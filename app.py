@@ -2356,7 +2356,6 @@ def add_record(table_name):
         cursor.close()
         conn.close()
 
-@app.route('/edit_row/<table_name>', methods=['POST'])
 def edit_row(table_name):
     if not is_valid_table(table_name):
         flash('Invalid table name!', 'error')
