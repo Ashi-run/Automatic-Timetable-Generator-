@@ -972,7 +972,24 @@ def bulk_generate():
         logger.error(f"Error in bulk_generate route: {str(e)}", exc_info=True)
         flash(f"An unexpected error occurred during bulk generation: {str(e)}", "error")
         return redirect(url_for('academic_coordinator_dashboard'))
-
+        
+@app.route('/api/get_rooms_by_type/<string:room_type>')
+def get_rooms_by_type(room_type):
+    conn = get_db_connection()
+    if conn is None:
+        return jsonify({'error': 'Database connection failed!'}), 500
+    cursor = conn.cursor(dictionary=True)
+    query = "SELECT room_id, room_number FROM rooms WHERE room_type = %s ORDER BY room_number"
+    try:
+        cursor.execute(query, (room_type,))
+        rooms = cursor.fetchall()
+        return jsonify(rooms)
+    except Error as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
+        
 @app.route("/export_timetables_csv")
 @login_required('academic_coordinator')
 def export_timetables_csv():
