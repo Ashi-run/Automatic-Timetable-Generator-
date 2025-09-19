@@ -10,6 +10,20 @@ import csv
 import io
 import os
 from decimal import Decimal
+from advanced_timetable_logic import (
+    generate_timetable_wrapper,
+    get_schools,
+    get_departments_by_school,
+    get_academic_years,
+    get_semesters_by_year,
+    get_sections_by_filters,
+    authenticate_coordinator,
+    get_user_school,
+    TimetableGenerator,
+    get_semester_dates_by_school,
+    get_subject_progress_for_department_and_semester,
+    generate_csv_output
+)
 
 # Placeholder for a separate DB configuration file (as in app1.py)
 class DBConfig:
@@ -456,14 +470,14 @@ def generate_csv_output(all_timetables_raw_data):
     return output.getvalue()
 
 
+
 # --- Consolidated Routes ---
 
 @app.route('/')
-def index():
+def index1():
     if 'user_id' in session:
         user_role = session.get('user_role')
         if user_role == 'academic_coordinator':
-            # This is the correct route for the academic coordinator dashboard
             return redirect(url_for('academic_coordinator_dashboard'))
         elif user_role == 'hod':
             return redirect(url_for('hod_dashboard'))
@@ -516,7 +530,7 @@ def login():
             
             flash(f"Logged in successfully as {user['name']}!", 'success')
 
-            return redirect(url_for('index'))
+            return redirect(url_for('index1'))
         else:
             flash('Invalid email or password', 'error')
 
@@ -535,7 +549,7 @@ def academic_coordinator_dashboard():
     conn = get_db_connection()
     if conn is None:
         flash('Database connection failed!', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('index1'))
     cursor = conn.cursor(dictionary=True)
     
     table_count = 0
@@ -553,8 +567,192 @@ def academic_coordinator_dashboard():
 
     return render_template('index1.html', database=db_config['database'], table_count=table_count, current_time=current_time)
 
+# Missing route for fetching faculty assignments with filters.
+@app.route('/api/get_faculty_assignments_by_filters')
+@login_required('academic_coordinator')
+def get_faculty_assignments_by_filters():
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({'error': 'Database connection failed!'}), 500
+    cursor = conn.cursor(dictionary=True)
+    query = """
+        SELECT fs.*, u.name as faculty_name, b.year as batch_year, b.semester,
+               s.name as subject_name, s.subject_code, sec.name as section_name, sub.name as subsection_name
+        FROM faculty_subjects fs
+        JOIN users u ON fs.faculty_id = u.user_id
+        JOIN batch_subjects bs ON fs.batch_subject_id = bs.batch_subject_id
+        JOIN subjects s ON bs.subject_id = s.subject_id
+        JOIN sections sec ON fs.section_id = sec.section_id
+        JOIN batches b ON bs.batch_id = b.batch_id
+        LEFT JOIN subsections sub ON fs.subsection_id = sub.subsection_id
+        WHERE 1=1
+    """
+    params = []
+    department_id = request.args.get('department_id')
+    academic_year_id = request.args.get('academic_year_id')
+    batch_id = request.args.get('batch_id')
+    semester = request.args.get('semester')
+    section_id = request.args.get('section_id')
+
+    if department_id:
+        query += " AND bs.batch_id IN (SELECT batch_id FROM batch_departments WHERE department_id = %s)"
+        params.append(department_id)
+    if academic_year_id:
+        query += " AND b.academic_year_id = %s"
+        params.append(academic_year_id)
+    if batch_id:
+        query += " AND b.batch_id = %s"
+        params.append(batch_id)
+    if semester:
+        query += " AND b.semester = %s"
+        params.append(semester)
+    if section_id:
+        query += " AND fs.section_id = %s"
+        params.append(section_id)
+
+    query += " ORDER BY u.name, b.year, b.semester"
+    try:
+        cursor.execute(query, tuple(params))
+        return jsonify(cursor.fetchall())
+    except Error as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+# Missing route for fetching batches by department.
+@app.route('/api/get_batches_by_department/<int:department_id>')
+@login_required('academic_coordinator')
+def get_batches_by_department(department_id):
+    conn = get_db_connection()
+    if conn is None: return jsonify([])
+    cursor = conn.cursor(dictionary=True)
+    query = """
+        SELECT b.batch_id, CONCAT(b.year, ' (Sem ', b.semester, ')') AS display_name, b.semester
+        FROM batches b
+        JOIN batch_departments bd ON b.batch_id = bd.batch_id
+        WHERE bd.department_id = %s
+        ORDER BY b.year, b.semester
+    """
+    cursor.execute(query, (department_id,))
+    batches = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    return jsonify(batches)
+
+# Missing route for fetching batches by both academic year and department.
+@app.route('/api/get_batches_by_academic_year_and_department/<int:year_id>/<int:department_id>')
+@login_required('academic_coordinator')
+def get_batches_by_academic_year_and_department(year_id, department_id):
+    conn = get_db_connection()
+    if conn is None: return jsonify([])
+    cursor = conn.cursor(dictionary=True)
+    query = """
+        SELECT b.batch_id, CONCAT(b.year, ' (Sem ', b.semester, ')') AS display_name, b.semester
+        FROM batches b
+        JOIN batch_departments bd ON b.batch_id = bd.batch_id
+        WHERE b.academic_year_id = %s AND bd.department_id = %s
+        ORDER BY b.year, b.semester
+    """
+    cursor.execute(query, (year_id, department_id))
+    batches = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    return jsonify(batches)
+
+# Missing route for fetching sections by batch.
+@app.route('/api/get_sections_by_batch/<int:batch_id>')
+@login_required('academic_coordinator')
+def get_sections_by_batch(batch_id):
+    conn = get_db_connection()
+    if conn is None: return jsonify([])
+    cursor = conn.cursor(dictionary=True)
+    query = "SELECT section_id, name FROM sections WHERE batch_id = %s ORDER BY name"
+    cursor.execute(query, (batch_id,))
+    sections = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    return jsonify(sections)
+
+# Missing route for fetching subsections by section.
+@app.route('/api/get_subsections_by_section/<int:section_id>')
+@login_required('academic_coordinator')
+def get_subsections_by_section(section_id):
+    conn = get_db_connection()
+    if conn is None: return jsonify([])
+    cursor = conn.cursor(dictionary=True)
+    query = "SELECT subsection_id, name FROM subsections WHERE section_id = %s ORDER BY name"
+    cursor.execute(query, (section_id,))
+    subsections = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    return jsonify(subsections)
+
+# Missing route for fetching subjects for a specific batch and semester.
+@app.route('/api/get_batch_subjects_by_batch_and_semester/<int:batch_id>/<int:semester>')
+@login_required('academic_coordinator')
+def get_batch_subjects_by_batch_and_semester(batch_id, semester):
+    conn = get_db_connection()
+    if conn is None: return jsonify([])
+    cursor = conn.cursor(dictionary=True)
+    query = """
+        SELECT bs.batch_subject_id, s.subject_id, s.name as subject_name, s.subject_code
+        FROM batch_subjects bs
+        JOIN subjects s ON bs.subject_id = s.subject_id
+        WHERE bs.batch_id = %s AND bs.semester = %s
+        ORDER BY s.name
+    """
+    cursor.execute(query, (batch_id, semester))
+    subjects = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    return jsonify(subjects)
+
+# Missing route for filtering batch-subject mappings.
+@app.route('/api/get_batch_subject_mappings_by_filters')
+@login_required('academic_coordinator')
+def get_batch_subject_mappings_by_filters():
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({'error': 'Database connection failed!'}), 500
+    cursor = conn.cursor(dictionary=True)
+    
+    query = """
+        SELECT bsm.batch_subject_id, b.year AS batch_year, bsm.semester, s.subject_code, s.name AS subject_name
+        FROM batch_subjects bsm
+        JOIN batches b ON bsm.batch_id = b.batch_id
+        JOIN subjects s ON bsm.subject_id = s.subject_id
+        WHERE 1=1
+    """
+    params = []
+    
+    academic_year_id = request.args.get('academic_year_id')
+    batch_id = request.args.get('batch_id')
+    semester = request.args.get('semester')
+
+    if academic_year_id:
+        query += " AND b.academic_year_id = %s"
+        params.append(academic_year_id)
+    if batch_id:
+        query += " AND bsm.batch_id = %s"
+        params.append(batch_id)
+    if semester:
+        query += " AND bsm.semester = %s"
+        params.append(semester)
+
+    query += " ORDER BY b.year, b.semester, s.name"
+    
+    try:
+        cursor.execute(query, tuple(params))
+        return jsonify(cursor.fetchall())
+    except Error as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
 # --- Timetable Generation Dashboard Routes ---
-@app.route("/enhanced_dashboard")
+@app.route("/timetable_viewer")
 @login_required('academic_coordinator')
 def enhanced_dashboard():
     try:
@@ -574,7 +772,7 @@ def enhanced_dashboard():
         departments = get_departments_by_school(coordinator_school_id)
         academic_years = get_academic_years()
         
-        return render_template("enhanced_dashboard.html",
+        return render_template("timetable_viewer.html",
                                schools=schools,
                                current_school=current_school,
                                departments=departments,
@@ -1682,7 +1880,7 @@ def subjects_management():
     conn = get_db_connection()
     if conn is None:
         flash('Database connection failed!', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('index1'))
     cursor = conn.cursor(dictionary=True)
     
     departments = []
@@ -1727,7 +1925,7 @@ def faculty_assignments():
     conn = get_db_connection()
     if conn is None:
         flash('Database connection failed!', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('index1'))
     cursor = conn.cursor(dictionary=True)
     
     faculties = []
@@ -1770,7 +1968,7 @@ def batches_sections_management():
     conn = get_db_connection()
     if conn is None:
         flash('Database connection failed!', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('index1'))
     cursor = conn.cursor(dictionary=True)
     
     batches = []
@@ -1820,7 +2018,7 @@ def batch_subject_mapping_management():
     conn = get_db_connection()
     if conn is None:
         flash('Database connection failed!', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('index1'))
     cursor = conn.cursor(dictionary=True)
 
     batches = []
@@ -1862,7 +2060,7 @@ def departments_schools_management():
     conn = get_db_connection()
     if conn is None:
         flash('Database connection failed!', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('index1'))
     cursor = conn.cursor(dictionary=True)
 
     schools = []
@@ -1892,7 +2090,7 @@ def faculty_constraints_management():
     conn = get_db_connection()
     if conn is None:
         flash('Database connection failed!', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('index1'))
     cursor = conn.cursor(dictionary=True)
 
     faculties = []
@@ -1931,7 +2129,7 @@ def faculty_unavailability_management():
     conn = get_db_connection()
     if conn is None:
         flash('Database connection failed!', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('index1'))
     cursor = conn.cursor(dictionary=True)
 
     faculties = []
@@ -1961,7 +2159,7 @@ def rooms_resources_management():
     conn = get_db_connection()
     if conn is None:
         flash('Database connection failed!', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('index1'))
     cursor = conn.cursor(dictionary=True)
 
     rooms = []
@@ -1991,7 +2189,7 @@ def holidays_management():
     conn = get_db_connection()
     if conn is None:
         flash('Database connection failed!', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('index1'))
     cursor = conn.cursor(dictionary=True)
 
     holidays = []
@@ -2007,11 +2205,12 @@ def holidays_management():
     return render_template('holidays_management.html', holidays=holidays)
 
 @app.route('/timetable_viewer')
+@login_required('academic_coordinator')
 def timetable_viewer():
     conn = get_db_connection()
     if conn is None:
         flash('Database connection failed!', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('index1'))
     cursor = conn.cursor(dictionary=True)
 
     sections = []
@@ -2055,14 +2254,14 @@ def add_record(table_name):
     if not is_valid_table(table_name):
         if request.headers.get('X-Requested-With') != 'XMLHttpRequest':
             flash('Invalid table name!', 'error')
-            return redirect(url_for('index'))
+            return redirect(url_for('index1'))
         return jsonify({'error': 'Invalid table name'}), 400
 
     conn = get_db_connection()
     if conn is None:
         if request.headers.get('X-Requested-With') != 'XMLHttpRequest':
             flash('Database connection failed!', 'error')
-            return redirect(request.referrer or url_for('index'))
+            return redirect(request.referrer or url_for('index1'))
         return jsonify({'error': 'Database connection failed!'}), 500
 
     cursor = conn.cursor()
@@ -2111,7 +2310,7 @@ def add_record(table_name):
         if not columns_to_insert:
             if request.headers.get('X-Requested-With') != 'XMLHttpRequest':
                 flash(f"No valid columns to insert for {table_name}.", 'error')
-                return redirect(request.referrer or url_for('index'))
+                return redirect(request.referrer or url_for('index1'))
             return jsonify({'error': f"No valid columns to insert for {table_name}."}), 400
 
         placeholders = ', '.join(['%s' for _ in columns_to_insert])
@@ -2130,7 +2329,7 @@ def add_record(table_name):
             return jsonify({'message': success_message}), 200
         else:
             flash(success_message, 'success')
-            return redirect(request.referrer or url_for('index'))
+            return redirect(request.referrer or url_for('index1'))
 
     except Error as e:
         conn.rollback()
@@ -2144,7 +2343,7 @@ def add_record(table_name):
             return jsonify({'error': f"Error adding record to {table_name}: {error_message}"}), 500
         else:
             flash(f"Error adding record to {table_name}: {error_message}", 'error')
-            return redirect(request.referrer or url_for('index'))
+            return redirect(request.referrer or url_for('index1'))
 
     except ValueError as e:
         conn.rollback()
@@ -2152,7 +2351,7 @@ def add_record(table_name):
             return jsonify({'error': f"Data type conversion error: {e}. Please check your input format."}), 400
         else:
             flash(f"Data type conversion error: {e}. Please check your input format.", 'error')
-            return redirect(request.referrer or url_for('index'))
+            return redirect(request.referrer or url_for('index1'))
     finally:
         cursor.close()
         conn.close()
@@ -2161,12 +2360,12 @@ def add_record(table_name):
 def edit_row(table_name):
     if not is_valid_table(table_name):
         flash('Invalid table name!', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('index1'))
 
     conn = get_db_connection()
     if conn is None:
         flash('Database connection failed!', 'error')
-        return redirect(request.referrer or url_for('index'))
+        return redirect(request.referrer or url_for('index1'))
 
     cursor = conn.cursor()
     try:
@@ -2275,14 +2474,14 @@ def edit_row(table_name):
             return jsonify({'error': f"Error updating record in {table_name}: {error_message}"}), 500
         else:
             flash(f"Error updating record in {table_name}: {error_message}", 'error')
-            return redirect(request.referrer or url_for('index'))
+            return redirect(request.referrer or url_for('index1'))
     except ValueError as e:
         conn.rollback()
         if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
             return jsonify({'error': f"Data type conversion error: {e}. Please check your input format."}), 400
         else:
             flash(f"Data type conversion error: {e}. Please check your input format.", 'error')
-            return redirect(request.referrer or url_for('index'))
+            return redirect(request.referrer or url_for('index1'))
     finally:
         cursor.close()
         conn.close()
@@ -2303,14 +2502,14 @@ def delete_record(table_name):
         if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
             return jsonify({'error': 'Primary key or value missing!'}), 400
         flash('Primary key or value missing for delete!', 'error')
-        return redirect(request.referrer or url_for('index'))
+        return redirect(request.referrer or url_for('index1'))
 
     conn = get_db_connection()
     if conn is None:
         if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
             return jsonify({'error': 'Database connection failed!'}), 500
         flash('Database connection failed!', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('index1'))
 
     cursor = conn.cursor()
     try:
@@ -2476,7 +2675,7 @@ def tables():
     conn = get_db_connection()
     if conn is None:
         flash('Database connection failed!', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('index1'))
 
     cursor = conn.cursor()
     cursor.execute("SHOW TABLES")

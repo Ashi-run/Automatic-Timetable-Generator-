@@ -8,17 +8,17 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         :root {
-            --nmims-blue: #1e3a8a;
-            --nmims-light-blue: #3b82f6;
+            --nmims-blue: #e21717;
+            --nmims-light-blue: #e8e8e8;
             --nmims-orange: #f97316;
-            --stme-color: #059669;
+            --stme-color: #eb1955;
             --soc-color: #dc2626;
-            --sbm-color: #7c3aed;
+            --sbm-color: #e11f36;
             --sptm-color: #ea580c;
         }
         
         body {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #e71728 0%, #764ba2 100%);
             min-height: 100vh;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
         }
@@ -32,7 +32,7 @@
         }
         
         .school-badge {
-            background: linear-gradient(135deg, var(--stme-color), #10b981);
+            background: linear-gradient(135deg, var(--stme-color), #ed1a24);
             color: white;
             padding: 0.5rem 1rem;
             border-radius: 25px;
@@ -43,7 +43,7 @@
         .card {
             border: none;
             border-radius: 15px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            box-shadow: 0 8px 32px rgba(181, 41, 41, 0.1);
             backdrop-filter: blur(10px);
             background: rgba(255, 255, 255, 0.95);
             transition: transform 0.3s ease, box-shadow 0.3s ease;
@@ -430,7 +430,7 @@
     <script>
         let currentStep = 2;
         let selectedData = {
-            school_id: {{ current_school.school_id }},
+            school_id: "{{ current_school.school_id }}",
             department_id: null,
             year_id: null,
             semester: null,

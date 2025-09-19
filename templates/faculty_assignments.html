@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+{% extends "base1.html" %}
 
 {% block content %}
 <style>
@@ -105,7 +105,7 @@
                         Assign Faculty to Subject-Section
                     </div>
                     <div class="card-body">
-                        <form id="assign-form" method="POST" action="{{ url_for('assign_multiple_faculty_subjects') }}">
+                        <form id="assign-form" method="POST" action="{{ url_for('get_faculty_list') }}">
                             <div class="row">
                                 <div class="col-md-6 mb-3">
                                     <label for="faculty" class="form-label">Faculty *</label>
@@ -335,7 +335,7 @@
                                 <option value="">-- Select Action --</option>
                                 <option value="reassign">Reassign Faculty</option>
                             </select>
-                            <form id="bulk-form" method="POST" action="{{ url_for('bulk_update_faculty_assignments') }}" class="d-flex align-items-center flex-grow-1">
+                            <form id="bulk-form" method="POST" action="{{ url_for('faculty_assignments') }}" class="d-flex align-items-center flex-grow-1">
                                 <select id="new_faculty" name="new_faculty_id" class="form-select me-2" style="display:none; width: auto;" required>
                                     <option value="">-- Select New Faculty --</option>
                                     {% for faculty in faculties %}
