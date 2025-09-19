@@ -620,6 +620,54 @@ def get_faculty_assignments_by_filters():
         cursor.close()
         conn.close()
 
+@app.route('/fetch_room_timetable_data')
+def fetch_room_timetable_data():
+    """
+    Fetches timetable data for all rooms to populate the usage tables.
+    Returns a JSON object containing the timetable entries.
+    """
+    conn = get_db_connection()
+    if conn is None:
+        # If the database connection fails, return a 500 error
+        return jsonify({'error': 'Database connection failed!'}), 500
+    
+    cursor = conn.cursor(dictionary=True)
+    query = """
+        SELECT
+            t.day_of_week,
+            ts.start_time,
+            ts.end_time,
+            r.room_number,
+            s.name AS subject_name,
+            u.name AS faculty_name,
+            sec.name AS section_name
+        FROM timetable t
+        JOIN timeslots ts ON t.timeslot_id = ts.timeslot_id
+        LEFT JOIN rooms r ON t.room_id = r.room_id
+        JOIN batch_subjects bs ON t.batch_subject_id = bs.batch_subject_id
+        JOIN subjects s ON bs.subject_id = s.subject_id
+        JOIN users u ON t.faculty_id = u.user_id
+        JOIN sections sec ON t.section_id = sec.section_id
+        WHERE t.is_cancelled = 0 AND t.is_completed = 0
+        ORDER BY r.room_number, t.day_of_week, ts.start_time
+    """
+    try:
+        cursor.execute(query)
+        data = cursor.fetchall()
+        # The database returns time objects, which are not directly JSON serializable.
+        # This loop converts them to strings.
+        for row in data:
+            if row['start_time']:
+                row['start_time'] = str(row['start_time'])
+            if row['end_time']:
+                row['end_time'] = str(row['end_time'])
+        return jsonify(data)
+    except Error as e:
+        # If a database error occurs, return an error message as JSON
+        return jsonify({'error': str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
 # Missing route for fetching batches by department.
 @app.route('/api/get_batches_by_department/<int:department_id>')
 @login_required('academic_coordinator')
