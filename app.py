@@ -639,6 +639,27 @@ def get_batches_by_department(department_id):
     cursor.close()
     conn.close()
     return jsonify(batches)
+@app.route('/api/get_batches_by_academic_year/<int:year_id>')
+@login_required('academic_coordinator')
+def get_batches_by_academic_year(year_id):
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({'error': 'Database connection failed!'}), 500
+    cursor = conn.cursor(dictionary=True)
+    query = """
+        SELECT batch_id, CONCAT(year, ' (Sem ', semester, ')') AS display_name, semester
+        FROM batches
+        WHERE academic_year_id = %s
+        ORDER BY year, semester
+    """
+    try:
+        cursor.execute(query, (year_id,))
+        return jsonify(cursor.fetchall())
+    except Error as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
 
 # Missing route for fetching batches by both academic year and department.
 @app.route('/api/get_batches_by_academic_year_and_department/<int:year_id>/<int:department_id>')
