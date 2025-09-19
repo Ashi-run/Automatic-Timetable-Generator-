@@ -1,0 +1,98 @@
+<div class="flex items-center space-x-4 mb-4">
+    <div class="flex-grow">
+        <label for="year-select" class="block text-sm font-medium text-gray-700">Select Academic Year:</label>
+        <select id="year-select" class="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm">
+            </select>
+    </div>
+    <div class="flex-grow">
+        <label for="semester-select" class="block text-sm font-medium text-gray-700">Select Semester:</label>
+        <select id="semester-select" class="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm">
+            </select>
+    </div>
+    <div class="flex-grow">
+        <label for="faculty-select" class="block text-sm font-medium text-gray-700">Select Faculty:</label>
+        <select id="faculty-select" class="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm">
+            <option value="">All Faculty</option>
+            </select>
+    </div>
+</div>
+
+<script>
+    // ... (rest of your existing script)
+
+    async function fetchDropdownData() {
+        try {
+            const [yearsRes, facultyRes, semestersRes] = await Promise.all([
+                fetch(`${API_BASE_URL}/api/hod/options/years`),
+                fetch(`${API_BASE_URL}/api/hod/options/faculty`),
+                fetch(`${API_BASE_URL}/api/hod/options/semesters`)
+            ]);
+            
+            const years = await yearsRes.json();
+            const facultyList = await facultyRes.json();
+            const semesters = await semestersRes.json();
+
+            populateSelect('year-select', years, 'year_id', 'year_name');
+            populateSelect('faculty-select', facultyList, 'faculty_id', 'faculty_name');
+            populateSelect('semester-select', semesters, 'semester', 'semester');
+
+            document.getElementById('year-select').addEventListener('change', updateTimetable);
+            document.getElementById('semester-select').addEventListener('change', updateTimetable);
+            document.getElementById('faculty-select').addEventListener('change', updateTimetable);
+
+        } catch (error) {
+            console.error('Error fetching dropdown data:', error);
+        }
+    }
+    
+    function populateSelect(selectId, data, valueKey, textKey) {
+        const select = document.getElementById(selectId);
+        if (selectId !== 'faculty-select') {
+            select.innerHTML = '<option value="">All</option>'; // Add "All" option for year/semester
+        }
+        data.forEach(item => {
+            const option = document.createElement('option');
+            option.value = item[valueKey];
+            option.textContent = item[textKey];
+            select.appendChild(option);
+        });
+    }
+
+    async function updateTimetable() {
+        const yearId = document.getElementById('year-select').value;
+        const semester = document.getElementById('semester-select').value;
+        const facultyId = document.getElementById('faculty-select').value;
+        await fetchDepartmentTimetable(yearId, semester, facultyId);
+    }
+    
+    // Modify this function to accept filters
+    async function fetchDepartmentTimetable(yearId = '', semester = '', facultyId = '') {
+        showLoading();
+        try {
+            const params = new URLSearchParams();
+            if (yearId) params.append('year_id', yearId);
+            if (semester) params.append('semester', semester);
+            if (facultyId) params.append('faculty_id', facultyId);
+            
+            const url = `${API_BASE_URL}/api/hod/department/timetable?${params.toString()}`;
+            const response = await fetch(url);
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+            const data = await response.json();
+            renderDepartmentTimetable(data);
+        } catch (error) {
+            console.error('Fetch error for department timetable:', error);
+            document.getElementById('hod-timetable-empty-message').textContent = `Error loading timetable: ${error.message}`;
+            document.getElementById('hod-timetable-empty-message').classList.remove('hidden');
+        } finally {
+            hideLoading();
+        }
+    }
+
+    window.onload = function() {
+        // ... (existing onload code)
+        
+        // Add a call to fetch dropdown data
+        fetchDropdownData();
+    };
+
+</script>

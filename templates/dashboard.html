@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Faculty Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body {
+            font-family: ui-sans-serif, system-ui, sans-serif;
+            background-color: #f3f4f6;
+            min-height: 100vh;
+        }
+        .header-bg {
+            background-color: #8B0000;
+        }
+        .card-header-bg {
+            background-color: #8B0000;
+            color: white;
+        }
+        .alert-info {
+            background-color: #d1ecf1;
+            color: #0c5460;
+            border-color: #bee5eb;
+        }
+        .alert-danger {
+            background-color: #f8d7da;
+            color: #721c24;
+            border-color: #f5c6cb;
+        }
+        .alert-success {
+            background-color: #d4edda;
+            color: #155724;
+            border-color: #c3e6cb;
+        }
+        .badge-success {
+            background-color: #28a745;
+            color: white;
+            padding: 0.25em 0.4em;
+            border-radius: 0.25rem;
+        }
+        .badge-warning {
+            background-color: #ffc107;
+            color: black;
+            padding: 0.25em 0.4em;
+            border-radius: 0.25rem;
+        }
+        .badge-danger {
+            background-color: #dc3545;
+            color: white;
+            padding: 0.25em 0.4em;
+            border-radius: 0.25rem;
+        }
+        .table-responsive {
+            overflow-x: auto;
+        }
+        .table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .table th, .table td {
+            padding: 0.75rem;
+            vertical-align: top;
+            border-top: 1px solid #dee2e6;
+        }
+        .table thead th {
+            vertical-align: bottom;
+            border-bottom: 2px solid #dee2e6;
+        }
+        .table-striped tbody tr:nth-of-type(odd) {
+            background-color: rgba(0, 0, 0, 0.05);
+        }
+        .table-hover tbody tr:hover {
+            background-color: rgba(0, 0, 0, 0.075);
+        }
+        .btn-primary {
+            background-color: #007bff;
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 0.25rem;
+        }
+        .btn-primary:hover {
+            background-color: #0056b3;
+        }
+        .btn-success {
+            background-color: #28a745;
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 0.25rem;
+        }
+        .btn-success:hover {
+            background-color: #218838;
+        }
+        .btn-danger {
+            background-color: #dc3545;
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 0.25rem;
+        }
+        .btn-danger:hover {
+            background-color: #c82333;
+        }
+        .modal {
+            display: none; /* Hidden by default */
+            position: fixed; /* Stay in place */
+            z-index: 1000; /* Sit on top */
+            left: 0;
+            top: 0;
+            width: 100%; /* Full width */
+            height: 100%; /* Full height */
+            overflow: auto; /* Enable scroll if needed */
+            background-color: rgba(0,0,0,0.4); /* Black w/ opacity */
+            justify-content: center;
+            align-items: center;
+        }
+        .modal-content {
+            background-color: #fefefe;
+            margin: auto;
+            padding: 20px;
+            border: 1px solid #888;
+            width: 80%;
+            max-width: 500px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            position: relative;
+        }
+        .close-button {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+        }
+        .close-button:hover,
+        .close-button:focus {
+            color: black;
+            text-decoration: none;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body class="flex flex-col min-h-screen">
+
+    <header class="header-bg text-white p-4 flex justify-between items-center shadow-md">
+        <div class="flex items-center space-x-4">
+            <img src="https://placehold.co/40x40/ffffff/8B0000?text=NMIMS" alt="NMIMS Logo" class="h-10">
+            <h1 class="text-2xl font-bold tracking-wide">Faculty Dashboard</h1>
+        </div>
+        <div class="flex items-center space-x-4">
+            <div class="flex items-center space-x-2">
+                <img src="https://placehold.co/40x40/cccccc/000000?text=F" alt="Profile" class="rounded-full border-2 border-white">
+                <span class="font-medium" id="current-faculty-name">{{ current_user_name }}</span>
+            </div>
+            <button id="logout-button" class="bg-red-700 hover:bg-red-800 text-white font-bold py-2 px-4 rounded-full shadow-md transition-colors duration-200">
+                Logout
+            </button>
+        </div>
+    </header>
+
+    <main class="flex-grow p-8 bg-gray-50 overflow-auto">
+        <div class="container mx-auto">
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div class="alert alert-{{ category }} mt-3 rounded-md p-3 mb-4">{{ message }}</div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+                <div class="bg-white p-6 rounded-xl shadow-md border border-gray-200">
+                    <h3 class="text-xl font-semibold text-gray-800 mb-4">Notifications</h3>
+                    <div id="notifications-list" class="space-y-3">
+                        {% if notifications %}
+                            {% for notification in notifications %}
+                                <div class="p-3 rounded-lg {% if not notification.is_read %}bg-blue-50{% else %}bg-gray-50{% endif %} border border-gray-200 text-sm">
+                                    <p class="font-medium">{{ notification.message }}</p>
+                                    <p class="text-xs text-gray-500">{{ notification.timestamp }}</p>
+                                </div>
+                            {% endfor %}
+                        {% else %}
+                            <p class="text-gray-500">No new notifications.</p>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <div class="bg-white p-6 rounded-xl shadow-md border border-gray-200">
+                    <h3 class="text-xl font-semibold text-gray-800 mb-4">Substitute Requests</h3>
+                    <div id="substitute-requests-list" class="space-y-3">
+                        {% if substitute_requests %}
+                            {% for request in substitute_requests %}
+                                <div class="p-3 rounded-lg bg-yellow-50 border border-yellow-200 text-sm">
+                                    <p class="font-medium">From: {{ request.requested_by_faculty }}</p>
+                                    <p>Subject: {{ request.subject_name }} ({{ request.section_name }})</p>
+                                    <p>Date: {{ request.class_date }} Time: {{ request.start_time }} - {{ request.end_time }}</p>
+                                    <p>Reason: {{ request.cancellation_reason }}</p>
+                                    <p class="font-semibold capitalize">Status: {{ request.status }}</p>
+                                    {% if request.status == 'pending' %}
+                                        <div class="mt-2 flex space-x-2">
+                                            <button onclick="respondToSubstitute({{ request.request_id }}, 'accepted')" class="bg-green-500 hover:bg-green-600 text-white text-xs font-bold py-1 px-2 rounded-full">Accept</button>
+                                            <button onclick="respondToSubstitute({{ request.request_id }}, 'rejected')" class="bg-red-500 hover:bg-red-600 text-white text-xs font-bold py-1 px-2 rounded-full">Reject</button>
+                                        </div>
+                                    {% endif %}
+                                </div>
+                            {% endfor %}
+                        {% else %}
+                            <p class="text-gray-500">No pending substitute requests.</p>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <div class="bg-white p-6 rounded-xl shadow-md border border-gray-200">
+                    <h3 class="text-xl font-semibold text-gray-800 mb-4">Lecture Completion</h3>
+                    <div id="lecture-completion-list" class="space-y-3">
+                        {% if lecture_completion %}
+                            {% for lecture in lecture_completion %}
+                                <div class="p-3 rounded-lg {% if lecture.status == 'completed' %}bg-green-50{% else %}bg-orange-50{% endif %} border border-gray-200 text-sm">
+                                    <p class="font-medium">{{ lecture.subject_name }} ({{ lecture.section_name }})</p>
+                                    <p>Date: {{ lecture.class_date }} Time: {{ lecture.start_time }} - {{ lecture.end_time }}</p>
+                                    <p class="font-semibold capitalize">Status: {{ lecture.status }}</p>
+                                </div>
+                            {% endfor %}
+                        {% else %}
+                            <p class="text-gray-500">No lecture completion data.</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white p-6 rounded-xl shadow-md border border-gray-200 mb-8">
+                <h3 class="text-xl font-semibold text-gray-800 mb-4">My Timetable</h3>
+                <div class="table-responsive">
+                    <table class="table table-hover table-striped">
+                        <thead>
+                            <tr>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Day</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Time</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Subject</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Section</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Room</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% if faculty_timetable %}
+                                {% for entry in faculty_timetable %}
+                                    <tr id="timetable-entry-{{ entry.entry_id }}">
+                                        <td class="px-4 py-2 whitespace-nowrap">{{ entry.entry_date }}</td>
+                                        <td class="px-4 py-2 whitespace-nowrap">{{ entry.day_of_week }}</td>
+                                        <td class="px-4 py-2 whitespace-nowrap">{{ entry.start_time }} - {{ entry.end_time }}</td>
+                                        <td class="px-4 py-2 whitespace-nowrap">{{ entry.subject_name }}</td>
+                                        <td class="px-4 py-2 whitespace-nowrap">{{ entry.section_name }}</td>
+                                        <td class="px-4 py-2 whitespace-nowrap">{{ entry.room_number if entry.room_number else 'N/A' }}</td>
+                                        <td class="px-4 py-2 whitespace-nowrap capitalize">
+                                            <span class="font-semibold {% if entry.type == 'cancelled' %}text-red-600{% else %}text-green-600{% endif %}">
+                                                {{ entry.type }}
+                                            </span>
+                                            {% if entry.type == 'cancelled' and entry.status_reason %}
+                                                <br><small class="text-gray-500">({{ entry.status_reason }})</small>
+                                            {% endif %}
+                                        </td>
+                                        <td class="px-4 py-2 whitespace-nowrap">
+                                            {% if entry.type == 'scheduled' %}
+                                                <button onclick="openCancelModal({{ entry.entry_id }})" class="bg-red-500 hover:bg-red-600 text-white text-xs font-bold py-1 px-2 rounded-full mb-1">Cancel</button>
+                                                <button onclick="updateLectureStatus({{ entry.entry_id }}, 'completed')" class="bg-green-500 hover:bg-green-600 text-white text-xs font-bold py-1 px-2 rounded-full">Mark Completed</button>
+                                            {% elif entry.type == 'cancelled' %}
+                                                <button onclick="openSubstituteModal({{ entry.entry_id }})" class="bg-blue-500 hover:bg-blue-600 text-white text-xs font-bold py-1 px-2 rounded-full mb-1">Request Substitute</button>
+                                                <button onclick="updateLectureStatus({{ entry.entry_id }}, 'pending')" class="bg-yellow-500 hover:bg-yellow-600 text-white text-xs font-bold py-1 px-2 rounded-full">Mark Pending</button>
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                {% endfor %}
+                            {% else %}
+                                <tr>
+                                    <td colspan="8" class="text-center py-4 text-gray-500">No timetable entries found.</td>
+                                </tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div id="cancelModal" class="modal">
+                <div class="modal-content">
+                    <span class="close-button" onclick="closeCancelModal()">&times;</span>
+                    <h2 class="text-xl font-semibold mb-4">Cancel Class</h2>
+                    <p>Are you sure you want to cancel this class?</p>
+                    <input type="hidden" id="cancel-timetable-id">
+                    <textarea id="cancel-reason" placeholder="Reason for cancellation" rows="3" class="w-full p-2 border rounded-md mt-4"></textarea>
+                    <div class="mt-4 flex justify-end space-x-2">
+                        <button onclick="confirmCancelClass()" class="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-full">Confirm Cancel</button>
+                        <button onclick="closeCancelModal()" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-full">Close</button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="substituteModal" class="modal">
+                <div class="modal-content">
+                    <span class="close-button" onclick="closeSubstituteModal()">&times;</span>
+                    <h2 class="text-xl font-semibold mb-4">Request Substitute</h2>
+                    <input type="hidden" id="substitute-timetable-id">
+                    <label for="substitute-faculty-select" class="block text-sm font-medium text-gray-700">Select Substitute Faculty:</label>
+                    <select id="substitute-faculty-select" class="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm">
+                         {% for faculty in faculty_list %}
+                            <option value="{{ faculty.faculty_id }}">{{ faculty.faculty_name }}</option>
+                        {% endfor %}
+                    </select>
+                    <textarea id="substitute-reason" placeholder="Reason for substitute request" rows="3" class="w-full p-2 border rounded-md mt-4"></textarea>
+                    <div class="mt-4 flex justify-end space-x-2">
+                        <button onclick="confirmSubstituteRequest()" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-full">Send Request</button>
+                        <button onclick="closeSubstituteModal()" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-full">Close</button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="messageModal" class="modal">
+                <div class="modal-content">
+                    <span class="close-button" onclick="closeMessageModal()">&times;</span>
+                    <p id="message-content" class="text-center text-lg font-medium"></p>
+                    <div class="mt-4 flex justify-center">
+                        <button onclick="closeMessageModal()" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-full">OK</button>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <footer class="bg-black text-white p-6">
+        <div class="container mx-auto text-center text-xs">
+            &copy; Copyright 2025 | NMIMS
+        </div>
+    </footer>
+
+    <script>
+        const API_BASE_URL = window.location.origin;
+
+        // Message Modal functions
+        function showMessageModal(message, isSuccess = true) {
+            const messageModal = document.getElementById('messageModal');
+            const messageContent = document.getElementById('message-content');
+            messageContent.textContent = message;
+            if (isSuccess) {
+                messageContent.classList.remove('text-red-500');
+                messageContent.classList.add('text-green-500');
+            } else {
+                messageContent.classList.remove('text-green-500');
+                messageContent.classList.add('text-red-500');
+            }
+            messageModal.style.display = 'flex'; // Use flex to center
+        }
+
+        function closeMessageModal() {
+            document.getElementById('messageModal').style.display = 'none';
+            window.location.reload(); 
+        }
+
+        // Cancel Modal functions
+        let currentTimetableEntryId = null;
+
+        function openCancelModal(entryId) {
+            currentTimetableEntryId = entryId;
+            document.getElementById('cancel-timetable-id').value = entryId;
+            document.getElementById('cancelModal').style.display = 'flex';
+        }
+
+        function closeCancelModal() {
+            document.getElementById('cancelModal').style.display = 'none';
+            document.getElementById('cancel-reason').value = '';
+        }
+
+        async function confirmCancelClass() {
+            const timetableEntryId = document.getElementById('cancel-timetable-id').value;
+            const reason = document.getElementById('cancel-reason').value;
+
+            if (!reason) {
+                showMessageModal('Please provide a reason for cancellation.', false);
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/faculty/current/cancel_class`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ timetable_entry_id: timetableEntryId, reason: reason })
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    showMessageModal(data.message, true);
+                    closeCancelModal();
+                } else {
+                    showMessageModal(data.error || 'Failed to cancel class.', false);
+                }
+            } catch (error) {
+                console.error('Error cancelling class:', error);
+                showMessageModal('An unexpected error occurred while cancelling the class.', false);
+            }
+        }
+
+        // Substitute Modal functions
+        async function openSubstituteModal(entryId) {
+            currentTimetableEntryId = entryId;
+            document.getElementById('substitute-timetable-id').value = entryId;
+            document.getElementById('substituteModal').style.display = 'flex';
+        }
+
+        function closeSubstituteModal() {
+            document.getElementById('substituteModal').style.display = 'none';
+            document.getElementById('substitute-faculty-select').value = '';
+            document.getElementById('substitute-reason').value = '';
+        }
+
+        async function confirmSubstituteRequest() {
+            const timetableEntryId = document.getElementById('substitute-timetable-id').value;
+            const requestedToFacultyId = document.getElementById('substitute-faculty-select').value;
+            const reason = document.getElementById('substitute-reason').value;
+
+            if (!requestedToFacultyId || !reason) {
+                showMessageModal('Please select a faculty and provide a reason.', false);
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/faculty/current/request_substitute`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        timetable_entry_id: timetableEntryId,
+                        requested_to_faculty_id: requestedToFacultyId,
+                        reason: reason
+                    })
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    showMessageModal(data.message, true);
+                    closeSubstituteModal();
+                } else {
+                    showMessageModal(data.error || 'Failed to send substitute request.', false);
+                }
+            } catch (error) {
+                console.error('Error sending substitute request:', error);
+                showMessageModal('An unexpected error occurred while sending the substitute request.', false);
+            }
+        }
+
+        // Lecture Status Update
+        async function updateLectureStatus(entryId, status) {
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/faculty/current/update_lecture_status`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ timetable_entry_id: entryId, status: status })
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    showMessageModal(data.message, true);
+                } else {
+                    showMessageModal(data.error || 'Failed to update lecture status.', false);
+                }
+            } catch (error) {
+                console.error('Error updating lecture status:', error);
+                showMessageModal('An unexpected error occurred while updating lecture status.', false);
+            }
+        }
+
+        // Respond to Substitute Request
+        async function respondToSubstitute(requestId, status) {
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/faculty/current/respond_substitute/${requestId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ status: status })
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    showMessageModal(data.message, true);
+                } else {
+                    showMessageModal(data.error || `Failed to ${status} substitute request.`, false);
+                }
+            } catch (error) {
+                console.error(`Error responding to substitute request ${status}:`, error);
+                showMessageModal('An unexpected error occurred while responding to the request.', false);
+            }
+        }
+
+        // Logout functionality
+        document.getElementById('logout-button').addEventListener('click', async () => {
+            try {
+                const response = await fetch(`${API_BASE_URL}/logout`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    window.location.href = `${API_BASE_URL}${data.redirect_url}`;
+                } else {
+                    console.error('Logout failed:', data.error);
+                    showMessageModal('Logout failed. Please try again.', false);
+                }
+            } catch (error) {
+                console.error('Error during logout:', error);
+                showMessageModal('An unexpected error occurred during logout.', false);
+            }
+        });
+
+    </script>
+</body>
+</html>

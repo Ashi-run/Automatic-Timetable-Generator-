@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HOD Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body {
+            font-family: ui-sans-serif, system-ui, sans-serif;
+            background-color: #f3f4f6;
+            min-height: 100vh;
+        }
+        .header-bg {
+            background-color: #8B0000;
+        }
+        .card-header-bg {
+            background-color: #8B0000;
+            color: white;
+        }
+        .alert-info {
+            background-color: #d1ecf1;
+            color: #0c5460;
+            border-color: #bee5eb;
+        }
+        .alert-danger {
+            background-color: #f8d7da;
+            color: #721c24;
+            border-color: #f5c6cb;
+        }
+        .alert-success {
+            background-color: #d4edda;
+            color: #155724;
+            border-color: #c3e6cb;
+        }
+        .badge-success {
+            background-color: #28a745;
+            color: white;
+            padding: 0.25em 0.4em;
+            border-radius: 0.25rem;
+        }
+        .badge-warning {
+            background-color: #ffc107;
+            color: black;
+            padding: 0.25em 0.4em;
+            border-radius: 0.25rem;
+        }
+        .badge-danger {
+            background-color: #dc3545;
+            color: white;
+            padding: 0.25em 0.4em;
+            border-radius: 0.25rem;
+        }
+        .table-responsive {
+            overflow-x: auto;
+        }
+        .table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .table th, .table td {
+            padding: 0.75rem;
+            vertical-align: top;
+            border-top: 1px solid #dee2e6;
+        }
+        .table thead th {
+            vertical-align: bottom;
+            border-bottom: 2px solid #dee2e6;
+        }
+        .table-striped tbody tr:nth-of-type(odd) {
+            background-color: rgba(0, 0, 0, 0.05);
+        }
+        .table-hover tbody tr:hover {
+            background-color: rgba(0, 0, 0, 0.075);
+        }
+        .btn-primary {
+            background-color: #007bff;
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 0.25rem;
+        }
+        .btn-primary:hover {
+            background-color: #0056b3;
+        }
+        .btn-success {
+            background-color: #28a745;
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 0.25rem;
+        }
+        .btn-success:hover {
+            background-color: #218838;
+        }
+        .btn-danger {
+            background-color: #dc3545;
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 0.25rem;
+        }
+        .btn-danger:hover {
+            background-color: #c82333;
+        }
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background-color: rgba(0,0,0,0.4);
+            justify-content: center;
+            align-items: center;
+        }
+        .modal-content {
+            background-color: #fefefe;
+            margin: auto;
+            padding: 20px;
+            border: 1px solid #888;
+            width: 80%;
+            max-width: 500px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            position: relative;
+        }
+        .close-button {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+        }
+        .close-button:hover,
+        .close-button:focus {
+            color: black;
+            text-decoration: none;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body class="flex flex-col min-h-screen">
+    <header class="header-bg text-white p-4 flex justify-between items-center shadow-md">
+        <div class="flex items-center space-x-4">
+            <img src="https://placehold.co/40x40/ffffff/8B0000?text=NMIMS" alt="NMIMS Logo" class="h-10">
+            <h1 class="text-2xl font-bold tracking-wide">HOD Dashboard</h1>
+        </div>
+        <div class="flex items-center space-x-4">
+            <div class="flex items-center space-x-2">
+                <img src="https://placehold.co/40x40/cccccc/000000?text=H" alt="Profile" class="rounded-full border-2 border-white">
+                <span class="font-medium" id="current-user-name">{{ user_name }}</span>
+            </div>
+            <button id="logout-button" class="bg-red-700 hover:bg-red-800 text-white font-bold py-2 px-4 rounded-full shadow-md transition-colors duration-200">
+                Logout
+            </button>
+        </div>
+    </header>
+
+    <main class="flex-grow p-8 bg-gray-50 overflow-auto">
+        <div class="container mx-auto">
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div class="alert alert-{{ category }} mt-3 rounded-md p-3 mb-4">{{ message }}</div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+                <div class="bg-white p-6 rounded-xl shadow-md border border-gray-200">
+                    <h3 class="text-xl font-semibold text-gray-800 mb-4">Department Progress Summary</h3>
+                    <div id="progress-chart-container" class="w-full h-48">
+                        </div>
+                </div>
+
+                <div class="bg-white p-6 rounded-xl shadow-md border border-gray-200">
+                    <h3 class="text-xl font-semibold text-gray-800 mb-4">Lagging Subjects</h3>
+                    <div id="lagging-subjects-list" class="space-y-3">
+                        <div id="lagging-loading-message" class="text-gray-500 text-center">Loading...</div>
+                        <p id="lagging-empty-message" class="text-gray-500 hidden">No subjects are lagging below 50% completion.</p>
+                    </div>
+                </div>
+
+                <div class="bg-white p-6 rounded-xl shadow-md border border-gray-200">
+                    <h3 class="text-xl font-semibold text-gray-800 mb-4">My Personal Timetable</h3>
+                    <div id="personal-timetable-list" class="space-y-3">
+                        <div id="personal-loading-message" class="text-gray-500 text-center">Loading...</div>
+                        <p id="personal-empty-message" class="text-gray-500 hidden">No personal timetable entries found.</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white p-6 rounded-xl shadow-md border border-gray-200 mb-8">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-xl font-semibold text-gray-800">Department Timetable</h3>
+                    <div class="flex space-x-2">
+                        <button onclick="downloadReport('timetable')" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-full text-xs">Download Timetable CSV</button>
+                        <button onclick="downloadReport('progress')" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-full text-xs">Download Progress CSV</button>
+                        <button onclick="downloadReport('lagging')" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-full text-xs">Download Lagging CSV</button>
+                    </div>
+                </div>
+
+                <div class="flex items-center space-x-4 mb-4">
+                    <div class="flex-grow">
+                        <label for="year-select" class="block text-sm font-medium text-gray-700">Select Academic Year:</label>
+                        <select id="year-select" class="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm">
+                            <option value="">All Years</option>
+                        </select>
+                    </div>
+                    <div class="flex-grow">
+                        <label for="semester-select" class="block text-sm font-medium text-gray-700">Select Semester:</label>
+                        <select id="semester-select" class="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm">
+                            <option value="">All Semesters</option>
+                        </select>
+                    </div>
+                    <div class="flex-grow">
+                        <label for="faculty-select" class="block text-sm font-medium text-gray-700">Select Faculty:</label>
+                        <select id="faculty-select" class="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm">
+                            <option value="">All Faculty</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="table-responsive">
+                    <table class="table table-hover table-striped">
+                        <thead>
+                            <tr>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Day</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Time</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Subject</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Faculty</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Section</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Room</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="department-timetable-body">
+                            <tr>
+                                <td colspan="8" class="text-center py-4 text-gray-500" id="hod-timetable-loading-message">Loading timetable...</td>
+                            </tr>
+                            <tr class="hidden">
+                                <td colspan="8" class="text-center py-4 text-gray-500" id="hod-timetable-empty-message">No timetable entries found.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer class="bg-black text-white p-6 mt-auto">
+        <div class="container mx-auto text-center text-xs">
+            &copy; Copyright 2025 | NMIMS
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        const API_BASE_URL = window.location.origin;
+
+        // Utility functions for UI
+        function showLoading(elementId = 'hod-timetable-loading-message') {
+            document.getElementById(elementId).textContent = 'Loading...';
+            document.getElementById(elementId).classList.remove('hidden');
+        }
+
+        function hideLoading(elementId = 'hod-timetable-loading-message') {
+            document.getElementById(elementId).classList.add('hidden');
+        }
+
+        // Fetch & Render Functions
+        async function fetchDropdownData() {
+            try {
+                const [yearsRes, facultyRes, semestersRes] = await Promise.all([
+                    fetch(`${API_BASE_URL}/api/hod/options/years`),
+                    fetch(`${API_BASE_URL}/api/hod/options/faculty`),
+                    fetch(`${API_BASE_URL}/api/hod/options/semesters`)
+                ]);
+
+                const years = await yearsRes.json();
+                const facultyList = await facultyRes.json();
+                const semesters = await semestersRes.json();
+
+                populateSelect('year-select', years, 'year_id', 'year_name');
+                populateSelect('faculty-select', facultyList, 'faculty_id', 'faculty_name');
+                populateSelect('semester-select', semesters, 'semester', 'semester');
+
+                document.getElementById('year-select').addEventListener('change', updateTimetable);
+                document.getElementById('semester-select').addEventListener('change', updateTimetable);
+                document.getElementById('faculty-select').addEventListener('change', updateTimetable);
+
+            } catch (error) {
+                console.error('Error fetching dropdown data:', error);
+            }
+        }
+
+        function populateSelect(selectId, data, valueKey, textKey) {
+            const select = document.getElementById(selectId);
+            // Clear existing options, but keep "All" if it's there
+            select.innerHTML = select.options[0] ? select.options[0].outerHTML : '';
+            data.forEach(item => {
+                const option = document.createElement('option');
+                option.value = item[valueKey];
+                option.textContent = item[textKey];
+                select.appendChild(option);
+            });
+        }
+
+        async function updateTimetable() {
+            const year = document.getElementById('year-select').value;
+            const semester = document.getElementById('semester-select').value;
+            const facultyId = document.getElementById('faculty-select').value;
+            await fetchDepartmentTimetable(year, semester, facultyId);
+        }
+
+        async function fetchDepartmentTimetable(year = '', semester = '', facultyId = '') {
+            showLoading('hod-timetable-loading-message');
+            document.getElementById('hod-timetable-empty-message').classList.add('hidden');
+            const tableBody = document.getElementById('department-timetable-body');
+            tableBody.innerHTML = `<tr><td colspan="8" class="text-center py-4 text-gray-500">Loading...</td></tr>`;
+
+            try {
+                const params = new URLSearchParams();
+                if (year) params.append('year', year);
+                if (semester) params.append('semester', semester);
+                if (facultyId) params.append('faculty_id', facultyId);
+
+                const url = `${API_BASE_URL}/api/hod/department/timetable?${params.toString()}`;
+                const response = await fetch(url);
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                const data = await response.json();
+                renderDepartmentTimetable(data);
+            } catch (error) {
+                console.error('Fetch error for department timetable:', error);
+                document.getElementById('hod-timetable-empty-message').textContent = `Error loading timetable: ${error.message}`;
+                document.getElementById('hod-timetable-empty-message').classList.remove('hidden');
+                tableBody.innerHTML = '';
+            } finally {
+                hideLoading('hod-timetable-loading-message');
+            }
+        }
+
+        function renderDepartmentTimetable(data) {
+            const tableBody = document.getElementById('department-timetable-body');
+            tableBody.innerHTML = ''; // Clear previous data
+            if (data.length === 0) {
+                document.getElementById('hod-timetable-empty-message').textContent = 'No timetable entries found.';
+                document.getElementById('hod-timetable-empty-message').classList.remove('hidden');
+                return;
+            }
+            data.forEach(entry => {
+                const row = document.createElement('tr');
+                const statusBadge = entry.type === 'cancelled'
+                    ? `<span class="badge-danger">Cancelled</span>`
+                    : `<span class="badge-success">Scheduled</span>`;
+
+                const statusReason = entry.type === 'cancelled' && entry.status_reason
+                    ? `<br><small class="text-gray-500">(${entry.status_reason})</small>`
+                    : '';
+
+                row.innerHTML = `
+                    <td class="px-4 py-2 whitespace-nowrap">${entry.entry_date}</td>
+                    <td class="px-4 py-2 whitespace-nowrap">${entry.day_of_week}</td>
+                    <td class="px-4 py-2 whitespace-nowrap">${entry.start_time} - ${entry.end_time}</td>
+                    <td class="px-4 py-2 whitespace-nowrap">${entry.subject_name}</td>
+                    <td class="px-4 py-2 whitespace-nowrap">${entry.faculty_name}</td>
+                    <td class="px-4 py-2 whitespace-nowrap">${entry.section_name}</td>
+                    <td class="px-4 py-2 whitespace-nowrap">${entry.classroom_name || 'N/A'}</td>
+                    <td class="px-4 py-2 whitespace-nowrap">${statusBadge}${statusReason}</td>
+                `;
+                tableBody.appendChild(row);
+            });
+        }
+
+        async function fetchLaggingSubjects() {
+            showLoading('lagging-loading-message');
+            document.getElementById('lagging-empty-message').classList.add('hidden');
+            const listContainer = document.getElementById('lagging-subjects-list');
+            listContainer.innerHTML = '';
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/hod/department/lagging_subjects`);
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                const data = await response.json();
+                renderLaggingSubjects(data);
+            } catch (error) {
+                console.error('Fetch error for lagging subjects:', error);
+                document.getElementById('lagging-empty-message').textContent = `Error loading data: ${error.message}`;
+                document.getElementById('lagging-empty-message').classList.remove('hidden');
+            } finally {
+                hideLoading('lagging-loading-message');
+            }
+        }
+
+        function renderLaggingSubjects(data) {
+            const listContainer = document.getElementById('lagging-subjects-list');
+            listContainer.innerHTML = '';
+            if (data.length === 0) {
+                document.getElementById('lagging-empty-message').textContent = 'No subjects are lagging below 50% completion.';
+                document.getElementById('lagging-empty-message').classList.remove('hidden');
+                return;
+            }
+            data.forEach(subject => {
+                const item = document.createElement('div');
+                item.className = 'p-3 rounded-lg bg-red-50 border border-red-200 text-sm';
+                item.innerHTML = `
+                    <p class="font-medium">${subject.subject_name} (${subject.section_name})</p>
+                    <p class="text-xs text-gray-700">Completion: <span class="font-bold">${subject.completion_percentage.toFixed(2)}%</span></p>
+                    <p class="text-xs text-gray-500">Completed ${subject.completed_sessions} of ${subject.total_sessions} sessions.</p>
+                `;
+                listContainer.appendChild(item);
+            });
+        }
+
+        async function fetchPersonalTimetable() {
+            showLoading('personal-loading-message');
+            document.getElementById('personal-empty-message').classList.add('hidden');
+            const listContainer = document.getElementById('personal-timetable-list');
+            listContainer.innerHTML = '';
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/hod/personal_timetable`);
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                const data = await response.json();
+                renderPersonalTimetable(data);
+            } catch (error) {
+                console.error('Fetch error for personal timetable:', error);
+                document.getElementById('personal-empty-message').textContent = `Error loading data: ${error.message}`;
+                document.getElementById('personal-empty-message').classList.remove('hidden');
+            } finally {
+                hideLoading('personal-loading-message');
+            }
+        }
+
+        function renderPersonalTimetable(data) {
+            const listContainer = document.getElementById('personal-timetable-list');
+            listContainer.innerHTML = '';
+            if (data.length === 0) {
+                document.getElementById('personal-empty-message').textContent = 'No personal timetable entries found.';
+                document.getElementById('personal-empty-message').classList.remove('hidden');
+                return;
+            }
+            data.forEach(entry => {
+                const item = document.createElement('div');
+                const statusColor = entry.type === 'cancelled' ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200';
+                item.className = `p-3 rounded-lg ${statusColor} border text-sm`;
+                item.innerHTML = `
+                    <p class="font-medium">${entry.subject_name} (${entry.section_name})</p>
+                    <p class="text-xs text-gray-500">${entry.entry_date} - ${entry.day_of_week}</p>
+                    <p class="text-xs text-gray-500">Time: ${entry.start_time} - ${entry.end_time}</p>
+                    <p class="font-semibold capitalize text-xs">Status: ${entry.type}</p>
+                    ${entry.status_reason ? `<p class="text-xs text-gray-500">Reason: ${entry.status_reason}</p>` : ''}
+                `;
+                listContainer.appendChild(item);
+            });
+        }
+        
+        async function fetchProgressData() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/hod/department/progress`);
+                if (!response.ok) throw new Error('Failed to fetch progress data');
+                const data = await response.json();
+                renderProgressChart(data);
+            } catch (error) {
+                console.error('Error fetching progress data:', error);
+                document.getElementById('progress-chart-container').innerHTML = '<p class="text-center text-red-500">Error loading chart.</p>';
+            }
+        }
+
+        function renderProgressChart(data) {
+            const ctx = document.createElement('canvas');
+            document.getElementById('progress-chart-container').innerHTML = '';
+            document.getElementById('progress-chart-container').appendChild(ctx);
+            
+            const labels = data.map(item => item.subject_name);
+            const percentages = data.map(item => item.completion_percentage);
+            const backgroundColors = percentages.map(p => {
+                if (p < 50) return 'rgba(220, 53, 69, 0.7)'; // Red
+                if (p < 80) return 'rgba(255, 193, 7, 0.7)';  // Yellow
+                return 'rgba(40, 167, 69, 0.7)'; // Green
+            });
+
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Lecture Completion %',
+                        data: percentages,
+                        backgroundColor: backgroundColors,
+                        borderColor: backgroundColors.map(c => c.replace('0.7', '1')),
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            max: 100,
+                            title: {
+                                display: true,
+                                text: 'Completion %'
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const item = data[context.dataIndex];
+                                    return `${item.subject_name}: ${item.completion_percentage.toFixed(2)}% (${item.completed_sessions}/${item.planned_sessions})`;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        function downloadReport(reportType) {
+            let url = '';
+            if (reportType === 'timetable') {
+                url = `${API_BASE_URL}/api/hod/reports/timetable_csv`;
+            } else if (reportType === 'progress') {
+                url = `${API_BASE_URL}/api/hod/reports/progress_csv`;
+            } else if (reportType === 'lagging') {
+                url = `${API_BASE_URL}/api/hod/reports/lagging_csv`;
+            }
+            window.location.href = url;
+        }
+        
+        // Logout functionality
+        document.getElementById('logout-button').addEventListener('click', async () => {
+            try {
+                const response = await fetch(`${API_BASE_URL}/logout`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    window.location.href = `${API_BASE_URL}${data.redirect_url}`;
+                } else {
+                    console.error('Logout failed:', data.error);
+                }
+            } catch (error) {
+                console.error('Error during logout:', error);
+            }
+        });
+
+        // Initial data load on page load
+        window.onload = function() {
+            fetchDropdownData();
+            fetchLaggingSubjects();
+            fetchPersonalTimetable();
+            fetchProgressData();
+            updateTimetable();
+        };
+
+    </script>
+</body>
+</html>

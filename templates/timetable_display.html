@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Timetable - {{ timetable_data.section_name }}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --nmims-blue: #1e3a8a;
+            --nmims-light-blue: #3b82f6;
+            --nmims-orange: #f97316;
+        }
+        
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        .timetable-header {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            margin-bottom: 2rem;
+        }
+        
+        .day-card {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            margin-bottom: 1.5rem;
+            border: none;
+            transition: transform 0.3s ease;
+        }
+        
+        .day-card:hover {
+            transform: translateY(-2px);
+        }
+        
+        .day-header {
+            background: linear-gradient(135deg, var(--nmims-blue), var(--nmims-light-blue));
+            color: white;
+            border-radius: 15px 15px 0 0;
+            padding: 1rem;
+            font-weight: 600;
+        }
+        
+        .session-slot {
+            background: linear-gradient(135deg, #f8fafc, #e2e8f0);
+            border-radius: 10px;
+            padding: 1rem;
+            margin-bottom: 0.5rem;
+            border-left: 4px solid var(--nmims-orange);
+            transition: all 0.3s ease;
+        }
+        
+        .session-slot:hover {
+            background: linear-gradient(135deg, #e2e8f0, #cbd5e1);
+            transform: translateX(5px);
+        }
+        
+        .time-badge {
+            background: var(--nmims-blue);
+            color: white;
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+        
+        .subject-name {
+            font-weight: 600;
+            color: var(--nmims-blue);
+            font-size: 1.1rem;
+        }
+        
+        .faculty-name {
+            color: #6b7280;
+            font-size: 0.9rem;
+        }
+        
+        .room-info {
+            background: var(--nmims-orange);
+            color: white;
+            padding: 0.25rem 0.5rem;
+            border-radius: 15px;
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+        
+        .stats-card {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+        }
+        
+        .generation-info {
+            background: linear-gradient(135deg, #10b981, #059669);
+            color: white;
+            border-radius: 10px;
+            padding: 1rem;
+        }
+        
+        .constraint-info {
+            background: linear-gradient(135deg, #f59e0b, #d97706);
+            color: white;
+            border-radius: 10px;
+            padding: 1rem;
+        }
+        
+        .empty-day {
+            text-align: center;
+            color: #6b7280;
+            font-style: italic;
+            padding: 2rem;
+        }
+        
+        .btn-back {
+            background: var(--nmims-blue);
+            border: none;
+            border-radius: 10px;
+            padding: 12px 24px;
+            font-weight: 600;
+            color: white;
+            text-decoration: none;
+            transition: all 0.3s ease;
+        }
+        
+        .btn-back:hover {
+            background: var(--nmims-light-blue);
+            color: white;
+            transform: translateY(-2px);
+        }
+        
+        .print-btn {
+            background: #10b981;
+            border: none;
+            border-radius: 10px;
+            padding: 12px 24px;
+            font-weight: 600;
+            color: white;
+        }
+        
+        @media print {
+            body {
+                background: white !important;
+            }
+            .no-print {
+                display: none !important;
+            }
+            .day-card {
+                break-inside: avoid;
+                box-shadow: none;
+                border: 1px solid #ddd;
+            }
+        }
+
+        /* Specific styles for the timetable grid cells */
+        .timetable-grid-cell {
+            min-width: 150px; /* Adjust as needed */
+            height: 100px; /* Adjust as needed */
+            vertical-align: top;
+            padding: 5px;
+            font-size: 0.85rem;
+            line-height: 1.2;
+        }
+        .timetable-grid-cell .subject-name {
+            font-weight: bold;
+            color: var(--nmims-blue);
+            font-size: 0.95rem;
+        }
+        .timetable-grid-cell .faculty-name {
+            font-size: 0.8rem;
+            color: #4a5568;
+        }
+        .timetable-grid-cell .room-info {
+            font-size: 0.75rem;
+            background-color: #e2e8f0;
+            color: #2d3748;
+            border-radius: 5px;
+            padding: 2px 5px;
+            margin-top: 5px;
+            display: inline-block;
+        }
+        .timetable-grid-cell.lab {
+            background-color: #e0f7fa; /* Light blue for labs */
+            border-left: 4px solid #00bcd4;
+        }
+        .timetable-grid-cell.lecture {
+            background-color: #f0fdf4; /* Light green for lectures */
+            border-left: 4px solid #4caf50;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid py-4">
+        <!-- Header -->
+        <div class="timetable-header p-4">
+            <div class="row align-items-center">
+                <div class="col-md-8">
+                    <h1 class="mb-2">
+                        <i class="fas fa-calendar-week text-primary me-3"></i>
+                        Timetable - {{ timetable_data.section_name }}
+                    </h1>
+                    <p class="text-muted mb-0">
+                        {% if view_mode %}
+                            Current Timetable View
+                        {% else %}
+                            Generated on {{ generation_time }}
+                        {% endif %}
+                    </p>
+                </div>
+                <div class="col-md-4 text-end no-print">
+                    <a href="{{ url_for('enhanced_dashboard') }}" class="btn-back me-2">
+                        <i class="fas fa-arrow-left me-2"></i>Back to Dashboard
+                    </a>
+                    <button onclick="window.print()" class="print-btn">
+                        <i class="fas fa-print me-2"></i>Print
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Flash Messages Area -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="row mb-4">
+                    <div class="col-12">
+                        {% for category, message in messages %}
+                            <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                                {{ message }}
+                                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                            </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            {% endif %}
+        {% endwith %}
+
+        <div class="row">
+            <div class="col-12">
+                <!-- Timetable Grid Display Card -->
+                <div class="card day-card mb-4">
+                    <div class="day-header">
+                        <h4 class="mb-0">
+                            <i class="fas fa-table me-2"></i>
+                            Timetable Grid
+                        </h4>
+                    </div>
+                    <div class="card-body p-0">
+                        {# Always attempt to render the grid if data is available #}
+                        {% if timetable_data.grid and timetable_data.timeslot_labels %}
+                            <div class="table-responsive">
+                                <table class="table table-bordered align-middle mb-0">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th style="width:120px;" class="text-center">Time</th>
+                                            {% for day in ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] %}
+                                                <th class="text-center">{{ day }}</th>
+                                            {% endfor %}
+                                        </tr>
+                                    </thead>
+                                   <tbody>
+                                    {% set occupied_cells = {} %}
+                                    {% for time_slot_label in timetable_data.timeslot_labels %}
+                                        <tr>
+                                            <td class="text-center fw-bold bg-light">{{ time_slot_label }}</td>
+                                            {% for day in ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] %}
+                                                {# Check if this cell is part of a previous merged cell #}
+                                                {% if occupied_cells[day] and occupied_cells[day] > 1 %}
+                                                    {% set _ = occupied_cells.update({day: occupied_cells[day] - 1}) %}
+                                                    {# Skip this cell as it's part of a rowspan from the row above #}
+                                                {% else %}
+                                                    {% set session = timetable_data.grid[day][time_slot_label] %}
+                                                    <td class="timetable-grid-cell {% if session %}
+                                                                                    {% if session.is_lab %}lab{% else %}lecture{% endif %}
+                                                                                    {% endif %}"
+                                                        {% if session and session.rowspan > 1 %}
+                                                            rowspan="{{ session.rowspan }}"
+                                                            {% set _ = occupied_cells.update({day: session.rowspan - 1}) %}
+                                                        {% endif %}>
+                                                        {% if session %}
+                                                            <div class="d-flex flex-column h-100 justify-content-center align-items-center">
+                                                                <span class="subject-name">{{ session.subject or 'N/A' }}</span>
+                                                                <small class="faculty-name">{{ session.faculty or 'N/A' }}</small>
+                                                                <span class="room-info mt-1">Room: {{ session.room or 'N/A' }}</span>
+                                                            </div>
+                                                        {% else %}
+                                                            <span class="text-muted fst-italic">Free</span>
+                                                        {% endif %}
+                                                    </td>
+                                                {% endif %}
+                                            {% endfor %}
+                                        </tr>
+                                    {% endfor %}
+                                </tbody>
+                                </table>
+                            </div>
+                        {% else %}
+                            <div class="alert alert-warning text-center m-3" role="alert">
+                                <i class="fas fa-info-circle me-2"></i>No timetable data available to display. This could mean no sessions were assigned, or there was an error in fetching data.
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <!-- Quick Summary -->
+            <div class="col-lg-6 mb-4">
+                <div class="stats-card h-100">
+                    <h5 class="mb-3">
+                        <i class="fas fa-info-circle text-info me-2"></i>
+                        Quick Summary
+                    </h5>
+                    {% set total_assigned_sessions = timetable_data.generation_log.total_slots_assigned if timetable_data.generation_log is defined else 0 %}
+                    {% set total_required_sessions = timetable_data.generation_log.total_slots_required if timetable_data.generation_log is defined else 0 %}
+                    {% set unique_subjects = timetable_data.raw_timetable|map(attribute='subject_name')|unique|list|length if timetable_data.raw_timetable else 0 %}
+                    {% set unique_faculty = timetable_data.raw_timetable|map(attribute='faculty_name')|unique|list|length if timetable_data.raw_timetable else 0 %}
+                    
+                    <div class="row text-center mb-3">
+                        <div class="col-4">
+                            <div class="border rounded p-2">
+                                <strong class="text-primary">{{ total_assigned_sessions }}</strong><br>
+                                <small>Assigned Sessions</small>
+                            </div>
+                        </div>
+                        <div class="col-4">
+                            <div class="border rounded p-2">
+                                <strong class="text-success">{{ unique_subjects }}</strong><br>
+                                <small>Subjects</small>
+                            </div>
+                        </div>
+                        <div class="col-4">
+                            <div class="border rounded p-2">
+                                <strong class="text-info">{{ unique_faculty }}</strong><br>
+                                <small>Faculty</small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="alert alert-info small">
+                        <i class="fas fa-lightbulb me-1"></i>
+                        This timetable respects all faculty constraints, room capacities, and scheduling rules as per NMIMS policies.
+                    </div>
+                    <div class="mt-3">
+                        <p class="mb-1"><strong>Generation Status:</strong> 
+                            <span class="badge bg-{{ 'success' if 'Success' in timetable_data.status else 'warning' if 'Partial' in timetable_data.status else 'danger' }}">
+                                {{ timetable_data.status }}
+                            </span>
+                        </p>
+                        <p class="mb-1"><strong>Success Rate:</strong> {{ "%.2f"|format(success_rate) }}%</p>
+                        <p class="mb-0"><strong>Generated On:</strong> {{ timetable_data.generated_at }}</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Constraint Issues -->
+            <div class="col-lg-6 mb-4">
+                {# Only display detailed constraints if there are explicit violations #}
+                {% if timetable_data.generation_log and timetable_data.generation_log.constraints_violated and timetable_data.generation_log.constraints_violated|length > 0 %}
+                    <div class="stats-card h-100">
+                        <h5 class="mb-3">
+                            <i class="fas fa-exclamation-triangle text-warning me-2"></i>
+                            Constraint Issues
+                        </h5>
+                        <div class="constraint-info p-3 rounded">
+                            <ul class="list-unstyled mb-0 small">
+                                {% for violation in timetable_data.generation_log.constraints_violated %}
+                                    <li class="mb-1">
+                                        <i class="fas fa-times-circle me-2 text-danger"></i>
+                                        {{ violation }}
+                                    </li>
+                                {% endfor %}
+                            </ul>
+                        </div>
+                    </div>
+                {% else %}
+                    <div class="stats-card h-100 d-flex align-items-center justify-content-center">
+                        <p class="text-muted text-center">No constraint information available or no violations occurred.</p>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="row no-print mt-4">
+            <div class="col-12 text-center">
+                <div class="stats-card d-inline-block">
+                    <h5 class="mb-3">
+                        <i class="fas fa-tools text-secondary me-2"></i>
+                        Actions
+                    </h5>
+                    <div class="d-grid gap-2 d-md-block">
+                        <button class="btn btn-outline-primary me-md-2" onclick="regenerateTimetable()">
+                            <i class="fas fa-redo me-2"></i>Regenerate Timetable
+                        </button>
+                        <button class="btn btn-outline-success me-md-2" onclick="exportTimetable()">
+                            <i class="fas fa-download me-2"></i>Export CSV
+                        </button>
+                        <button class="btn btn-outline-info" onclick="viewAPI()">
+                            <i class="fas fa-code me-2"></i>View JSON
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Initialize tooltips
+        var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
+        var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+            return new bootstrap.Tooltip(tooltipTriggerEl)
+        })
+
+        function regenerateTimetable() {
+            // Using a custom modal/confirmation instead of alert()
+            showCustomConfirm('This will generate a new timetable. Continue?', function() {
+                window.location.href = `/generate_timetable?section_id={{ timetable_data.section_id }}`;
+            });
+        }
+
+        function exportTimetable() {
+            if (!{{ timetable_data.grid|tojson }} || !{{ timetable_data.timeslot_labels|tojson }}) {
+                showCustomAlert('Timetable data is incomplete. Please generate the timetable.');
+                return;
+            }
+            let csv = 'Day,' + {{ timetable_data.timeslot_labels|tojson }}.join(',') + '\n';
+            const daysOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+            
+            daysOrder.forEach(day => {
+                csv += `${day}`;
+                {{ timetable_data.timeslot_labels|tojson }}.forEach(slot => {
+                    const session = {{ timetable_data.grid|tojson }}[day] ? {{ timetable_data.grid|tojson }}[day][slot] : null;
+                    if (session) {
+                        csv += `,"${session.subject || 'N/A'} - ${session.faculty || 'N/A'} (Room: ${session.room || 'N/A'})"`;
+                    } else {
+                        csv += ',-';
+                    }
+                });
+                csv += '\n';
+            });
+
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `timetable_section_{{ timetable_data.section_id }}_{{ generation_time|replace(" ", "_")|replace(":", "-") }}.csv`;
+            document.body.appendChild(a); // Append to body to ensure it works in all browsers
+            a.click();
+            document.body.removeChild(a); // Clean up
+            window.URL.revokeObjectURL(url);
+        }
+
+        function viewAPI() {
+            window.open(`/api/timetable/{{ timetable_data.section_id }}`, '_blank');
+        }
+
+        // Custom Alert/Confirm Modals (instead of alert/confirm)
+        function showCustomAlert(message) {
+            const alertModal = new bootstrap.Modal(document.getElementById('customAlertModal'));
+            document.getElementById('customAlertModalBody').innerText = message;
+            alertModal.show();
+        }
+
+        function showCustomConfirm(message, callback) {
+            const confirmModal = new bootstrap.Modal(document.getElementById('customConfirmModal'));
+            document.getElementById('customConfirmModalBody').innerText = message;
+            
+            const confirmBtn = document.getElementById('customConfirmBtn');
+            const newConfirmBtn = confirmBtn.cloneNode(true); // Clone to remove old event listeners
+            confirmBtn.parentNode.replaceChild(newConfirmBtn, confirmBtn); // Replace old with new
+            
+            newConfirmBtn.onclick = function() {
+                callback();
+                confirmModal.hide();
+            };
+            confirmModal.show();
+        }
+    </script>
+
+    <!-- Custom Alert Modal HTML -->
+    <div class="modal fade" id="customAlertModal" tabindex="-1" aria-labelledby="customAlertModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="customAlertModalLabel">Alert</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body" id="customAlertModalBody">
+                    <!-- Message will be inserted here -->
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-primary" data-bs-dismiss="modal">OK</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Custom Confirm Modal HTML -->
+    <div class="modal fade" id="customConfirmModal" tabindex="-1" aria-labelledby="customConfirmModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="customConfirmModalLabel">Confirmation</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body" id="customConfirmModalBody">
+                    <!-- Message will be inserted here -->
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="customConfirmBtn">Confirm</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

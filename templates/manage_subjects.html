@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manage Subjects - Timetable System</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+    {% include 'navbar.html' %}
+    <div class="container mt-4">
+        <h2>Manage Subjects</h2>
+        <div class="card">
+            <div class="card-header">
+                <h4>Department Subjects</h4>
+            </div>
+            <div class="card-body">
+                {% for department in departments %}
+                <div class="mb-4">
+                    <h5>{{ department.name }}</h5>
+                    <div class="list-group">
+                        <!-- Subjects would be listed here -->
+                        <div class="list-group-item">Subject 1</div>
+                        <div class="list-group-item">Subject 2</div>
+                    </div>
+                </div>
+                {% endfor %}
+                <button class="btn btn-primary mt-3">Add New Subject</button>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

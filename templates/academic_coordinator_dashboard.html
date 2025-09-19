@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+    <h1 class="h2">Academic Coordinator Dashboard</h1>
+</div>
+
+<div class="container">
+    <div class="row">
+        <div class="col-md-12">
+            <div class="card">
+                <div class="card-header" style="background-color: #d32f2f;">
+                    <h3 style="color: white !important; font-weight: bold;">Dashboard Overview</h3>
+                </div>
+                <div class="card-body">
+                    <p>Welcome to the Academic Coordinator Dashboard. This page provides an overview of the academic scheduling system.</p>
+                    <p>Use the navigation menu above to access different management sections:</p>
+                    <ul>
+                        <li><strong>Subjects Management</strong> - Manage subjects and their mappings to batches</li>
+                        <li><strong>Batches & Sections Management</strong> - Manage batches, sections, and their relationships</li>
+                        <li><strong>Faculty Assignments</strong> - Assign faculty to subjects and sections</li>
+                        <li><strong>Faculty Constraints</strong> - Manage faculty availability and constraints</li>
+                        <li><strong>Faculty Unavailability</strong> - Manage specific faculty unavailability slots</li>
+                        <li><strong>Rooms & Resources</strong> - Manage rooms and their unavailability</li>
+                        <li><strong>Holidays Management</strong> - Manage holidays and special dates</li>
+                        <li><strong>Timetable</strong> - View and generate timetables</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="row mt-4">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header" style="background-color: #d32f2f;">
+                    <h3 style="color: white !important; font-weight: bold;">Quick Actions</h3>
+                </div>
+                <div class="card-body">
+                    <div class="d-grid gap-2">
+                        <a href="{{ url_for('subjects_management') }}" class="btn btn-primary">Manage Subjects</a>
+                        <a href="{{ url_for('batches_sections_management') }}" class="btn btn-primary">Manage Batches & Sections</a>
+                        <a href="{{ url_for('faculty_assignments') }}" class="btn btn-primary">Manage Faculty Assignments</a>
+                        <a href="{{ url_for('timetable_viewer') }}" class="btn btn-primary">View Timetable</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header" style="background-color: #d32f2f;">
+                    <h3 style="color: white !important; font-weight: bold;">System Information</h3>
+                </div>
+                <div class="card-body">
+                    <p><strong>Database:</strong> {{ database }}</p>
+                    <p><strong>Tables:</strong> {{ table_count }}</p>
+                    <p><strong>Last Updated:</strong> {{ current_time }}</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Initialize any dashboard-specific JavaScript here
+    $(document).ready(function() {
+        console.log("Academic Coordinator Dashboard loaded");
+    });
+</script>
+{% endblock %}

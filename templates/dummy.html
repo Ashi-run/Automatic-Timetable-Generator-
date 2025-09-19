@@ -1,0 +1,544 @@
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
+import mysql.connector
+import datetime
+import json
+from decimal import Decimal
+from mysql.connector import Error
+
+app = Flask(__name__)
+app.secret_key = 'your_secret_key_here'
+
+# Database configuration
+db_config = {
+    'host': 'localhost',
+    'user': 'root',
+    'password': '',
+    'database': 'reclassify'
+}
+
+def get_db_connection():
+    """Establishes and returns a database connection."""
+    try:
+        conn = mysql.connector.connect(**db_config)
+        if conn.is_connected():
+            return conn
+    except Error as e:
+        print(f"Error connecting to MySQL: {e}")
+        return None
+    return None
+
+def is_valid_table(table_name):
+    """Checks if a table name exists in the database to prevent SQL injection."""
+    conn = get_db_connection()
+    if conn is None:
+        return False
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SHOW TABLES LIKE %s", (table_name,))
+        result = cursor.fetchone()
+        return result is not None
+    except Error as e:
+        print(f"Error validating table name: {e}")
+        return False
+    finally:
+        cursor.close()
+        conn.close()
+
+def setup_credit_rules_table():
+    conn = get_db_connection()
+    if conn:
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS credit_session_rules (
+                    credits INT NOT NULL,
+                    theory_sessions INT NOT NULL,
+                    lab_sessions INT NOT NULL,
+                    PRIMARY KEY (credits)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+            """)
+            conn.commit()
+            print("credit_session_rules table is ready.")
+        except Error as e:
+            print(f"Error setting up credit_session_rules table: {e}")
+        finally:
+            cursor.close()
+            conn.close()
+
+setup_credit_rules_table()
+
+@app.route('/api/get_credit_rules', methods=['GET'])
+def get_credit_rules():
+    conn = get_db_connection()
+    if conn is None:
+        return jsonify({'error': 'Database connection failed!'}), 500
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute("SELECT credits, theory_sessions, lab_sessions FROM credit_session_rules ORDER BY credits")
+        rules = cursor.fetchall()
+        return jsonify(rules)
+    except Error as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.route('/api/save_credit_rules', methods=['POST'])
+def save_credit_rules():
+    data = request.get_json()
+    rules = data.get('rules')
+    if not rules:
+        return jsonify({'error': 'No rules provided'}), 400
+
+    conn = get_db_connection()
+    if conn is None:
+        return jsonify({'error': 'Database connection failed!'}), 500
+    cursor = conn.cursor()
+    
+    try:
+        for rule in rules:
+            credits = rule['credits']
+            theory_sessions = rule['theory_sessions']
+            lab_sessions = rule['lab_sessions']
+            cursor.execute("""
+                INSERT INTO credit_session_rules (credits, theory_sessions, lab_sessions)
+                VALUES (%s, %s, %s)
+                ON DUPLICATE KEY UPDATE
+                theory_sessions = VALUES(theory_sessions),
+                lab_sessions = VALUES(lab_sessions)
+            """, (credits, theory_sessions, lab_sessions))
+        conn.commit()
+        return jsonify({'message': 'Credit rules saved successfully!'}), 200
+    except Error as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.route('/add/<table_name>', methods=['POST'])
+def add_record(table_name):
+    if not is_valid_table(table_name):
+        if request.headers.get('X-Requested-With') != 'XMLHttpRequest':
+            flash('Invalid table name!', 'error')
+            return redirect(url_for('index'))
+        return jsonify({'error': 'Invalid table name'}), 400
+
+    conn = get_db_connection()
+    if conn is None:
+        if request.headers.get('X-Requested-With') != 'XMLHttpRequest':
+            flash('Database connection failed!', 'error')
+            return redirect(request.referrer or url_for('index'))
+        return jsonify({'error': 'Database connection failed!'}), 500
+
+    cursor = conn.cursor()
+    try:
+        cursor.execute(f"SHOW COLUMNS FROM {table_name}")
+        db_columns_info = cursor.fetchall()
+        db_columns = [col[0] for col in db_columns_info]
+        
+        cursor.execute(f"SHOW KEYS FROM {table_name} WHERE Key_name = 'PRIMARY'")
+        pk_info = cursor.fetchone()
+        primary_key_column = pk_info[4] if pk_info else None
+
+        columns_to_insert = []
+        values_to_insert = []
+        
+        # LOGIC FOR SUBJECTS TABLE
+        if table_name == 'subjects':
+            credits = int(request.form.get('credits', 0))
+            has_lab = request.form.get('has_lab', '0') == '1'
+            lab_duration = float(request.form.get('lab_duration_hours', 2.0)) if has_lab else None
+            is_lab_continuous = request.form.get('is_lab_continuous', '0') == '1' if has_lab else False
+            exam_type = request.form.get('exam_type')
+
+            rules_cursor = conn.cursor(dictionary=True)
+            rules_cursor.execute("SELECT theory_sessions, lab_sessions FROM credit_session_rules WHERE credits = %s", (credits,))
+            rule = rules_cursor.fetchone()
+            rules_cursor.close()
+
+            if rule:
+                theory_sessions_per_week = rule['theory_sessions']
+                lab_sessions_per_week = rule['lab_sessions'] if has_lab else 0
+            else:
+                theory_sessions_per_week = credits
+                lab_sessions_per_week = 1 if has_lab else 0
+
+            form_data_with_sessions = request.form.to_dict()
+            form_data_with_sessions['theory_sessions_per_week'] = theory_sessions_per_week
+            form_data_with_sessions['lab_sessions_per_week'] = lab_sessions_per_week
+            form_data_with_sessions['lab_duration_hours'] = lab_duration
+            form_data_with_sessions['is_lab_continuous'] = 1 if is_lab_continuous else 0
+            form_data_with_sessions['exam_type'] = exam_type
+            request.form = form_data_with_sessions
+
+        # Loop through form data and build query
+        for col_name in db_columns:
+            if col_name == primary_key_column and any('auto_increment' in col_info[3].lower() for col_info in db_columns_info if col_info[0] == col_name):
+                continue
+            
+            form_value = request.form.get(col_name)
+            
+            if col_name == 'available_days' and table_name == 'faculty_constraints':
+                available_days_list = request.form.getlist('available_days')
+                form_value = json.dumps(available_days_list)
+                
+            elif col_name in ['is_active', 'has_lab', 'is_current', 'affects_timetable', 'is_rescheduled', 'is_lab_session', 'seen', 'is_visiting_faculty', 'is_lab_continuous']:
+                values_to_insert.append(1 if form_value == '1' else 0)
+            elif col_name in ['credits', 'year', 'semester', 'start_year', 'end_year', 'capacity', 'floor', 'max_hours_per_week', 'max_hours_per_day', 'min_weekly_hours', 'max_weekly_hours', 'total_students', 'max_subsection_size', 'total_weeks', 'total_required', 'conducted', 'total_slots_assigned', 'total_slots_required', 'theory_sessions_per_week', 'lab_sessions_per_week']:
+                try:
+                    values_to_insert.append(int(form_value) if form_value else None)
+                except (ValueError, TypeError):
+                    values_to_insert.append(None)
+            elif col_name in ['total_hours_assigned', 'completion_percentage', 'generation_time_seconds', 'lab_duration_hours']:
+                try:
+                    values_to_insert.append(Decimal(form_value) if form_value else None)
+                except (ValueError, TypeError):
+                    values_to_insert.append(None)
+            elif col_name in ['assigned_date', 'start_date', 'end_date', 'date', 'week_start_date', 'generation_date', 'responded_at', 'modified_at', 'created_at', 'login_time', 'last_activity', 'timestamp']:
+                values_to_insert.append(form_value if form_value else None)
+            else:
+                values_to_insert.append(form_value)
+            
+            columns_to_insert.append(col_name)
+
+        if not columns_to_insert:
+            if request.headers.get('X-Requested-With') != 'XMLHttpRequest':
+                flash(f"No valid columns to insert for {table_name}.", 'error')
+                return redirect(request.referrer or url_for('index'))
+            return jsonify({'error': f"No valid columns to insert for {table_name}."}), 400
+
+        placeholders = ', '.join(['%s' for _ in columns_to_insert])
+        columns_list = ', '.join(columns_to_insert)
+        
+        query = f"INSERT INTO {table_name} ({columns_list}) VALUES ({placeholders})"
+        
+        cursor.execute(query, values_to_insert)
+        conn.commit()
+        
+        success_message = f"Record added to {table_name} successfully!"
+        if table_name == 'subjects':
+            success_message = f"Subject '{request.form.get('name')}' added successfully!<br>Auto-assigned sessions:<br>- Theory: {request.form.get('theory_sessions_per_week')} sessions/week<br>- Lab: {request.form.get('lab_sessions_per_week')} sessions/week"
+        
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return jsonify({'message': success_message}), 200
+        else:
+            flash(success_message, 'success')
+            return redirect(request.referrer or url_for('index'))
+
+    except Error as e:
+        conn.rollback()
+        error_message = str(e)
+        if "foreign key constraint" in error_message.lower():
+            error_message = "Foreign key constraint violation. Please ensure the referenced record exists in the related table."
+        if "duplicate entry" in error_message.lower():
+            error_message = "Duplicate entry found. The record you are trying to add already exists."
+        
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return jsonify({'error': f"Error adding record to {table_name}: {error_message}"}), 500
+        else:
+            flash(f"Error adding record to {table_name}: {error_message}", 'error')
+            return redirect(request.referrer or url_for('index'))
+
+    except ValueError as e:
+        conn.rollback()
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return jsonify({'error': f"Data type conversion error: {e}. Please check your input format."}), 400
+        else:
+            flash(f"Data type conversion error: {e}. Please check your input format.", 'error')
+            return redirect(request.referrer or url_for('index'))
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.route('/edit_row/<table_name>', methods=['POST'])
+def edit_row(table_name):
+    if not is_valid_table(table_name):
+        flash('Invalid table name!', 'error')
+        return redirect(url_for('index'))
+
+    conn = get_db_connection()
+    if conn is None:
+        flash('Database connection failed!', 'error')
+        return redirect(request.referrer or url_for('index'))
+
+    cursor = conn.cursor()
+    try:
+        primary_key = request.form.get('primary_key')
+        primary_value = request.form.get('primary_value')
+
+        if not primary_key or not primary_value:
+            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                return jsonify({'error': 'Primary key or value missing for update!'}), 400
+            else:
+                flash('Primary key or value missing for update!', 'error')
+                return redirect(request.referrer or url_for('table_view', table_name=table_name))
+
+        cursor.execute(f"SHOW COLUMNS FROM {table_name}")
+        db_columns = [col[0] for col in cursor.fetchall()]
+
+        set_clauses = []
+        values = []
+
+        if 'available_days' in db_columns and table_name == 'faculty_constraints':
+            available_days_list = request.form.getlist('available_days')
+            if '' in available_days_list:
+                available_days_list.remove('')
+            form_value = json.dumps(available_days_list)
+            set_clauses.append(f"available_days = %s")
+            values.append(form_value)
+            form_data = {k: v for k, v in request.form.items() if k != 'available_days'}
+        else:
+            form_data = request.form
+
+        if table_name == 'subjects':
+            has_lab = form_data.get('has_lab', '0') == '1'
+            lab_duration = float(form_data.get('lab_duration_hours', 2.0)) if has_lab else None
+            is_lab_continuous = form_data.get('is_lab_continuous', '0') == '1' if has_lab else False
+            exam_type = form_data.get('exam_type')
+            
+            set_clauses.append("exam_type = %s")
+            values.append(exam_type)
+
+            credits = int(form_data.get('credits', 0))
+            if 'credits' in db_columns:
+                rules_cursor = conn.cursor(dictionary=True)
+                rules_cursor.execute("SELECT theory_sessions, lab_sessions FROM credit_session_rules WHERE credits = %s", (credits,))
+                rule = rules_cursor.fetchone()
+                rules_cursor.close()
+
+                if rule:
+                    theory_sessions_per_week = rule['theory_sessions']
+                    lab_sessions_per_week = rule['lab_sessions'] if has_lab else 0
+                    set_clauses.append("theory_sessions_per_week = %s")
+                    values.append(theory_sessions_per_week)
+                    set_clauses.append("lab_sessions_per_week = %s")
+                    values.append(lab_sessions_per_week)
+
+        for col in db_columns:
+            if col == primary_key or col in ['available_days', 'exam_type', 'theory_sessions_per_week', 'lab_sessions_per_week']:
+                continue
+
+            form_value = form_data.get(col)
+
+            if col in ['is_active', 'has_lab', 'is_current', 'affects_timetable', 'is_rescheduled', 'is_lab_session', 'seen', 'is_visiting_faculty', 'is_lab_continuous']:
+                values.append(1 if form_value == '1' else 0)
+            elif col in ['credits', 'year', 'semester', 'start_year', 'end_year', 'capacity', 'floor', 'max_hours_per_week', 'max_hours_per_day', 'min_weekly_hours', 'max_weekly_hours', 'total_students', 'max_subsection_size', 'total_weeks', 'total_required', 'conducted', 'total_slots_assigned', 'total_slots_required']:
+                try:
+                    values.append(int(form_value) if form_value else None)
+                except (ValueError, TypeError):
+                    values.append(None)
+            elif col in ['total_hours_assigned', 'completion_percentage', 'generation_time_seconds', 'lab_duration_hours']:
+                try:
+                    values.append(Decimal(form_value) if form_value else None)
+                except (ValueError, TypeError):
+                    values.append(None)
+            elif col in ['assigned_date', 'start_date', 'end_date', 'date', 'week_start_date', 'generation_date', 'responded_at', 'modified_at', 'created_at', 'login_time', 'last_activity', 'timestamp']:
+                values.append(form_value if form_value else None)
+            else:
+                values.append(form_value)
+            
+            set_clauses.append(f"{col} = %s")
+
+        if not set_clauses:
+            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                return jsonify({'message': "No changes detected or valid columns to update."}), 200
+            else:
+                flash("No changes detected or valid columns to update.", 'info')
+                return redirect(request.referrer or url_for('table_view', table_name=table_name))
+
+        query = f"UPDATE {table_name} SET {', '.join(set_clauses)} WHERE {primary_key} = %s"
+        values.append(primary_value)
+
+        cursor.execute(query, values)
+        conn.commit()
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return jsonify({'message': f"Record in {table_name} updated successfully!"}), 200
+        else:
+            flash(f"Record in {table_name} updated successfully!", 'success')
+            return redirect(request.referrer or url_for('table_view', table_name=table_name))
+    except Error as e:
+        conn.rollback()
+        error_message = str(e)
+        if "foreign key constraint" in error_message.lower():
+            error_message = "Foreign key constraint violation. Please ensure the referenced record exists in the related table."
+        if "duplicate entry" in error_message.lower():
+            error_message = "Duplicate entry found. The record you are trying to edit already exists."
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return jsonify({'error': f"Error updating record in {table_name}: {error_message}"}), 500
+        else:
+            flash(f"Error updating record in {table_name}: {error_message}", 'error')
+            return redirect(request.referrer or url_for('index'))
+    except ValueError as e:
+        conn.rollback()
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return jsonify({'error': f"Data type conversion error: {e}. Please check your input format."}), 400
+        else:
+            flash(f"Data type conversion error: {e}. Please check your input format.", 'error')
+            return redirect(request.referrer or url_for('index'))
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.route('/get_row/<table_name>')
+def get_row(table_name):
+    if not is_valid_table(table_name):
+        return jsonify({'error': 'Invalid table name'}), 400
+
+    conn = get_db_connection()
+    if conn is None:
+        return jsonify({'error': 'Database connection failed!'}), 500
+
+    primary_key = request.args.get('primary_key')
+    primary_value = request.args.get('primary_value')
+
+    if not primary_key or not primary_value:
+        return jsonify({'error': 'Primary key or value not provided'}), 400
+
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(f"SELECT * FROM {table_name} WHERE {primary_key} = %s", (primary_value,))
+        row = cursor.fetchone()
+        if row:
+            for key, value in row.items():
+                if isinstance(value, (datetime.date, datetime.datetime)):
+                    row[key] = value.isoformat()
+                elif isinstance(value, datetime.timedelta):
+                    row[key] = str(value)
+                elif isinstance(value, Decimal):
+                    row[key] = str(value)
+                elif isinstance(value, bytes):
+                    try:
+                        row[key] = value.decode('utf-8')
+                    except UnicodeDecodeError:
+                        row[key] = value.hex()
+                elif key == 'available_days' and isinstance(value, str):
+                    try:
+                        row[key] = json.loads(value)
+                    except json.JSONDecodeError:
+                        row[key] = []
+                elif key.endswith('_id') and isinstance(value, int):
+                    row[key] = str(value)
+            return jsonify(row)
+        else:
+            return jsonify({'error': 'Row not found'}), 404
+    except Error as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.route('/delete/<table_name>')
+def delete_record(table_name):
+    primary_key = request.args.get('primary_key')
+    primary_value = request.args.get('primary_value')
+
+    if not is_valid_table(table_name):
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return jsonify({'error': 'Invalid table name'}), 400
+        flash('Invalid table name!', 'error')
+        return redirect(url_for('tables'))
+
+    if not primary_key or not primary_value:
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return jsonify({'error': 'Primary key or value missing!'}), 400
+        flash('Primary key or value missing for delete!', 'error')
+        return redirect(request.referrer or url_for('index'))
+
+    conn = get_db_connection()
+    if conn is None:
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return jsonify({'error': 'Database connection failed!'}), 500
+        flash('Database connection failed!', 'error')
+        return redirect(url_for('index'))
+
+    cursor = conn.cursor()
+    try:
+        query = f"DELETE FROM {table_name} WHERE {primary_key} = %s"
+        cursor.execute(query, (primary_value,))
+        conn.commit()
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return jsonify({'message': f"Record in {table_name} deleted successfully!"}), 200
+        flash(f"Record in {table_name} deleted successfully!", 'success')
+        return redirect(request.referrer or url_for('index'))
+    except Error as e:
+        conn.rollback()
+        error_message = f"Error deleting record from {table_name}: {e}"
+        if "foreign key constraint" in str(e).lower():
+            error_message = f"Cannot delete record from {table_name}. It is referenced by other tables."
+        
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return jsonify({'error': error_message}), 500
+        flash(error_message, 'error')
+        return redirect(request.referrer or url_for('index'))
+    finally:
+        cursor.close()
+        conn.close()
+
+# New route to handle multiple assignments
+@app.route('/assign_multiple_faculty_subjects', methods=['POST'])
+def assign_multiple_faculty_subjects():
+    conn = get_db_connection()
+    if conn is None:
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return jsonify({'error': 'Database connection failed!'}), 500
+        flash('Database connection failed!', 'error')
+        return redirect(request.referrer)
+    cursor = conn.cursor()
+
+    faculty_ids = request.form.getlist('faculty_id[]')
+    batch_subject_ids = request.form.getlist('batch_subject_id[]')
+    section_ids = request.form.getlist('section_id[]')
+    subsection_ids = request.form.getlist('subsection_id[]')
+    
+    # Handle the single-select subject as a single-item list for consistency
+    single_batch_subject_id = request.form.get('batch_subject_id')
+    if single_batch_subject_id and not batch_subject_ids:
+        batch_subject_ids = [single_batch_subject_id]
+        
+    if not faculty_ids or not batch_subject_ids or not section_ids:
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return jsonify({'error': 'Faculty, subject, and section are required!'}), 400
+        flash('Faculty, subject, and section are required!', 'error')
+        return redirect(request.referrer)
+        
+    try:
+        insert_query = "INSERT INTO faculty_subjects (faculty_id, batch_subject_id, section_id, subsection_id) VALUES (%s, %s, %s, %s)"
+        
+        # Iterate over all possible combinations
+        for faculty_id in faculty_ids:
+            for batch_subject_id in batch_subject_ids:
+                for section_id in section_ids:
+                    # If no subsection is selected, add a single entry for the main section
+                    if not subsection_ids or '' in subsection_ids:
+                        subsection_id = None
+                        cursor.execute(insert_query, (int(faculty_id), int(batch_subject_id), int(section_id), subsection_id))
+                    else:
+                        for subsection_id in subsection_ids:
+                             cursor.execute(insert_query, (int(faculty_id), int(batch_subject_id), int(section_id), int(subsection_id)))
+
+        conn.commit()
+        success_message = "Assignments added successfully!"
+
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return jsonify({'message': success_message}), 200
+        else:
+            flash(success_message, 'success')
+            return redirect(url_for('faculty_assignments'))
+    except Error as e:
+        conn.rollback()
+        error_message = str(e)
+        if "foreign key constraint" in error_message.lower():
+            error_message = "Foreign key constraint violation. Please ensure all selections are valid."
+        if "duplicate entry" in error_message.lower():
+            error_message = "Duplicate entry found. One or more assignments you are trying to add already exist."
+
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return jsonify({'error': f"Error adding assignments: {error_message}"}), 500
+        else:
+            flash(f"Error adding assignments: {error_message}", 'error')
+            return redirect(request.referrer)
+    finally:
+        cursor.close()
+        conn.close()
+

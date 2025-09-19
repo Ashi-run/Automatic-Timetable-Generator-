@@ -1,0 +1,891 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+    /* Custom styles for the page layout */
+    .sidebar {
+        min-width: 250px;
+        max-width: 250px;
+        background-color: #343a40; /* Dark gray background for a professional look */
+        padding: 1.5rem;
+        border-right: 1px solid #495057;
+        height: calc(100vh - 56px); /* Adjust height to fit below the navbar */
+        position: sticky;
+        top: 56px;
+        overflow-y: auto;
+    }
+    .main-content {
+        padding: 1.5rem;
+        flex-grow: 1;
+        width: 100%;
+    }
+    .card {
+        border-radius: 0.5rem;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        background-color: #fff;
+    }
+    .card-header {
+        background-color: #e9ecef; /* Light gray header */
+        font-weight: bold;
+    }
+    .table-container {
+        margin-top: 2rem;
+    }
+    #assignments_table th, #assignments_table td {
+        padding: 0.75rem;
+        vertical-align: middle;
+    }
+    #assignments_table tbody tr:nth-child(even) {
+        background-color: #f8f9fa; /* Zebra striping for readability */
+    }
+    #assignments_table tbody tr:hover {
+        background-color: #e2e6ea; /* Highlight row on hover */
+    }
+    .nav-link {
+        color: #f8f9fa; /* Light text for dark background */
+        border-radius: 0.25rem;
+        margin-bottom: 0.5rem;
+    }
+    .nav-link.active {
+        color: #fff;
+        background-color: #0d6efd; /* Blue to indicate active state */
+    }
+    .tab-pane {
+        display: none;
+    }
+    .tab-pane.active {
+        display: block;
+    }
+    .form-select[multiple] {
+        min-height: 150px;
+    }
+    body .container-fluid {
+        display: flex;
+        padding: 0;
+    }
+    .d-flex {
+        width: 100%;
+        margin: 0 auto;
+    }
+    .filter-section .form-select {
+        height: auto;
+    }
+</style>
+
+<div class="d-flex justify-content-between flex-wrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+    <h1 class="h2">Manage Faculty Assignments</h1>
+</div>
+
+<div class="d-flex">
+    <div class="sidebar d-flex flex-column p-3">
+        <ul class="nav nav-pills flex-column mb-auto" id="sidebar-tabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <a class="nav-link active" id="assign-tab" data-bs-toggle="tab" href="#assign-faculty-subject" role="tab" aria-controls="assign-faculty-subject" aria-selected="true">Assign Faculty to Subject</a>
+            </li>
+            <li class="nav-item" role="presentation">
+                <a class="nav-link" id="add-batch-subject-tab" data-bs-toggle="tab" href="#add-batch-subject" role="tab" aria-controls="add-batch-subject" aria-selected="false">Add Subject to Batch</a>
+            </li>
+            <li class="nav-item" role="presentation">
+                <a class="nav-link" id="add-subject-tab" data-bs-toggle="tab" href="#add-new-subject" role="tab" aria-controls="add-new-subject" aria-selected="false">Add New Subject</a>
+            </li>
+            <li class="nav-item" role="presentation">
+                <a class="nav-link" id="add-faculty-tab" data-bs-toggle="tab" href="#add-new-faculty" role="tab" aria-controls="add-new-faculty" aria-selected="false">Add New Faculty</a>
+            </li>
+            <li class="nav-item" role="presentation">
+                <a class="nav-link" id="view-assignments-tab" data-bs-toggle="tab" href="#existing-assignments" role="tab" aria-controls="existing-assignments" aria-selected="false">View Existing Assignments</a>
+            </li>
+        </ul>
+    </div>
+    
+    <div class="main-content">
+        <div class="tab-content" id="sidebar-tabs-content">
+            <div class="tab-pane fade show active" id="assign-faculty-subject" role="tabpanel" aria-labelledby="assign-tab">
+                <div class="card">
+                    <div class="card-header">
+                        Assign Faculty to Subject-Section
+                    </div>
+                    <div class="card-body">
+                        <form id="assign-form" method="POST" action="{{ url_for('assign_multiple_faculty_subjects') }}">
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label for="faculty" class="form-label">Faculty *</label>
+                                    <select id="faculty" name="faculty_id[]" class="form-select" required multiple>
+                                        {% for faculty in faculties %}
+                                            <option value="{{ faculty.user_id }}">{{ faculty.name }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label for="batch_assign" class="form-label">Batch *</label>
+                                    <select id="batch_assign" name="batch_id[]" class="form-select" required multiple>
+                                        {% for batch in batches %}
+                                            <option value="{{ batch.batch_id }}" data-academic-year="{{ batch.academic_year_id }}" data-semester="{{ batch.semester }}">{{ batch.year }} (Sem {{ batch.semester }})</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-4 mb-3">
+                                    <label for="semester_assign" class="form-label">Semester *</label>
+                                    <input type="number" class="form-control" id="semester_assign" name="semester" min="1" max="8" readonly>
+                                </div>
+                                <div class="col-md-8 mb-3">
+                                    <label for="batch_subject_assign" class="form-label">Batch Subject *</label>
+                                    <select id="batch_subject_assign" name="batch_subject_id" class="form-select" required>
+                                        <option value="">-- Select Batch and Semester First --</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label for="section_assign" class="form-label">Section *</label>
+                                    <select id="section_assign" name="section_id[]" class="form-select" required multiple>
+                                        <option value="">-- Select Batch First --</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label for="subsection_assign" class="form-label">Subsection (Optional)</label>
+                                    <select id="subsection_assign" name="subsection_id[]" class="form-select" multiple>
+                                        <option value="">-- Select Section First --</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-primary">Assign Faculty</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="tab-pane fade" id="add-batch-subject" role="tabpanel" aria-labelledby="add-batch-subject-tab">
+                <div class="card">
+                    <div class="card-header">
+                        Add Subject to Batch
+                    </div>
+                    <div class="card-body">
+                        <form id="add-batch-subject-form" method="POST" action="{{ url_for('add_record', table_name='batch_subjects') }}">
+                            <div class="mb-3">
+                                <label for="batch_subject_add_batch" class="form-label">Batch *</label>
+                                <select id="batch_subject_add_batch" name="batch_id" class="form-select" required>
+                                    <option value="">-- Select Batch --</option>
+                                    {% for batch in batches %}
+                                        <option value="{{ batch.batch_id }}" data-semester="{{ batch.semester }}">{{ batch.year }} (Sem {{ batch.semester }})</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label for="semester_subject_add" class="form-label">Semester *</label>
+                                <input type="number" class="form-control" id="semester_subject_add" name="semester" min="1" max="8" required readonly>
+                            </div>
+                            <div class="mb-3">
+                                <label for="subject_add" class="form-label">Subject *</label>
+                                <select id="subject_add" name="subject_id" class="form-select" required>
+                                    <option value="">-- Select Subject --</option>
+                                    {% for subject in subjects_for_add %}
+                                        <option value="{{ subject.subject_id }}">{{ subject.subject_code }} - {{ subject.name }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <button type="submit" class="btn btn-primary">Add Subject to Batch</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="tab-pane fade" id="add-new-subject" role="tabpanel" aria-labelledby="add-subject-tab">
+                <div class="card">
+                    <div class="card-header">
+                        Add New Subject
+                    </div>
+                    <div class="card-body">
+                        <form id="add-subject-form" action="{{ url_for('add_record', table_name='subjects') }}" method="POST">
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label for="subject_code" class="form-label">Subject Code *</label>
+                                    <input type="text" class="form-control" id="subject_code" name="subject_code" required>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label for="name" class="form-label">Subject Name *</label>
+                                    <input type="text" class="form-control" id="name" name="name" required>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-4 mb-3">
+                                    <label for="credits" class="form-label">Credits *</label>
+                                    <input type="number" class="form-control" id="credits" name="credits" min="0" required>
+                                </div>
+                                <div class="col-md-4 mb-3">
+                                    <label for="has_lab" class="form-label">Has Lab?</label>
+                                    <select class="form-select" id="has_lab" name="has_lab">
+                                        <option value="0">No</option>
+                                        <option value="1">Yes</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-4 mb-3">
+                                    <label for="term_end_exam" class="form-label">Term End Exam?</label>
+                                    <select class="form-select" id="term_end_exam" name="term_end_exam">
+                                        <option value="1">Yes</option>
+                                        <option value="0">No</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-primary">Add Subject</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <div class="tab-pane fade" id="add-new-faculty" role="tabpanel" aria-labelledby="add-faculty-tab">
+                <div class="card">
+                    <div class="card-header">
+                        Add New Faculty
+                    </div>
+                    <div class="card-body">
+                        <form id="add-faculty-form" action="{{ url_for('add_record', table_name='users') }}" method="POST">
+                            <input type="hidden" name="role" value="faculty">
+                            <input type="hidden" name="password_hash" value="placeholder_password">
+                            <input type="hidden" name="employment_type" value="permanent">
+                            <div class="mb-3">
+                                <label for="faculty_name" class="form-label">Name *</label>
+                                <input type="text" class="form-control" id="faculty_name" name="name" required>
+                            </div>
+                            <div class="mb-3">
+                                <label for="faculty_email" class="form-label">Email *</label>
+                                <input type="email" class="form-control" id="faculty_email" name="email" required>
+                            </div>
+                            <div class="mb-3">
+                                <label for="faculty_school" class="form-label">School *</label>
+                                <select id="faculty_school" name="school_id" class="form-select" required>
+                                    <option value="">-- Select School --</option>
+                                    {% for school in schools %}
+                                        <option value="{{ school.school_id }}">{{ school.name }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label for="faculty_department" class="form-label">Department *</label>
+                                <select id="faculty_department" name="department_id" class="form-select" required>
+                                    <option value="">-- Select School First --</option>
+                                </select>
+                            </div>
+                            <button type="submit" class="btn btn-primary">Add Faculty</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <div class="tab-pane fade" id="existing-assignments" role="tabpanel" aria-labelledby="view-assignments-tab">
+                <div class="card">
+                    <div class="card-header">
+                        Existing Faculty Assignments
+                    </div>
+                    <div class="card-body">
+                        <div id="filters" class="row g-3 mb-4 filter-section">
+                            <div class="col-md-3">
+                                <label for="filter_department" class="form-label">Department</label>
+                                <select id="filter_department" class="form-select">
+                                    <option value="">-- All Departments --</option>
+                                    {% for dept in departments %}
+                                        <option value="{{ dept.department_id }}">{{ dept.name }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-md-3">
+                                <label for="filter_academic_year" class="form-label">Academic Year</label>
+                                <select id="filter_academic_year" class="form-select">
+                                    <option value="">-- All Academic Years --</option>
+                                    {% for year in academic_years %}
+                                        <option value="{{ year.year_id }}">{{ year.year_name }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-md-3">
+                                <label for="filter_batch" class="form-label">Batch</label>
+                                <select id="filter_batch" class="form-select">
+                                    <option value="">-- Select Academic Year First --</option>
+                                </select>
+                            </div>
+                            <div class="col-md-3">
+                                <label for="filter_semester" class="form-label">Semester</label>
+                                <select id="filter_semester" name="semester" class="form-select">
+                                    <option value="">-- All Semesters --</option>
+                                    {% for i in range(1, 9) %}
+                                        <option value="{{ i }}">{{ i }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-md-3">
+                                <label for="filter_section" class="form-label">Section</label>
+                                <select id="filter_section" class="form-select">
+                                    <option value="">-- Select Batch First --</option>
+                                </select>
+                            </div>
+                            <div class="col-md-9 d-flex align-items-end">
+                                <div>
+                                    <button type="button" class="btn btn-primary me-2" onclick="loadAssignments()">Apply Filters</button>
+                                    <button type="button" class="btn btn-secondary" onclick="clearFilters()">Clear Filters</button>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <hr>
+                        
+                        <div class="d-flex align-items-center mb-3">
+                            <label for="bulk_action" class="form-label me-2 mb-0">Bulk Actions:</label>
+                            <select id="bulk_action" class="form-select me-2" style="width: auto;">
+                                <option value="">-- Select Action --</option>
+                                <option value="reassign">Reassign Faculty</option>
+                            </select>
+                            <form id="bulk-form" method="POST" action="{{ url_for('bulk_update_faculty_assignments') }}" class="d-flex align-items-center flex-grow-1">
+                                <select id="new_faculty" name="new_faculty_id" class="form-select me-2" style="display:none; width: auto;" required>
+                                    <option value="">-- Select New Faculty --</option>
+                                    {% for faculty in faculties %}
+                                        <option value="{{ faculty.user_id }}">{{ faculty.name }}</option>
+                                    {% endfor %}
+                                </select>
+                                <button type="submit" id="bulk_apply" class="btn btn-success" style="display:none;">Apply</button>
+                            </form>
+                        </div>
+
+                        <div class="table-responsive">
+                            <table id="assignments_table" class="table table-striped table-hover compact">
+                                <thead>
+                                    <tr>
+                                        <th><input type="checkbox" id="select_all" onclick="toggleSelectAll(this)"></th>
+                                        <th>Assignment ID</th>
+                                        <th>Faculty</th>
+                                        <th>Batch Year</th>
+                                        <th>Semester</th>
+                                        <th>Subject</th>
+                                        <th>Section</th>
+                                        <th>Subsection</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="assignments_tbody">
+                                    </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script>
+    // Global map to store common subjects and their batch subject IDs
+    const commonSubjectMap = new Map();
+
+    // Store active tab ID in localStorage
+    function setActiveTab(tabId) {
+        localStorage.setItem('activeTab', tabId);
+    }
+
+    // Get active tab ID from localStorage and set it
+    function getActiveTab() {
+        const activeTabId = localStorage.getItem('activeTab');
+        if (activeTabId) {
+            const activeTab = document.getElementById(activeTabId);
+            if (activeTab) {
+                const tabPaneId = activeTab.getAttribute('href').substring(1);
+                const currentActiveTab = document.querySelector('.nav-link.active');
+                const currentActivePane = document.querySelector('.tab-pane.active');
+                if(currentActiveTab) currentActiveTab.classList.remove('active');
+                if(currentActivePane) currentActivePane.classList.remove('active', 'show');
+                activeTab.classList.add('active');
+                document.getElementById(tabPaneId).classList.add('active', 'show');
+            }
+        }
+    }
+    
+    window.onload = function() {
+        // Handle initial tab display from localStorage
+        getActiveTab();
+        
+        // Load assignments table on initial page load
+        loadAssignments();
+        
+        // Attach event listeners for form submissions
+        document.getElementById('assign-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const selectedSubjectId = document.getElementById('batch_subject_assign').value;
+            const form = this;
+            // Remove old hidden inputs to prevent duplicates
+            form.querySelectorAll('input[name="batch_subject_id[]"]').forEach(input => input.remove());
+            
+            // Re-add hidden inputs for all relevant batch_subject_ids
+            if (selectedSubjectId && commonSubjectMap.has(Number(selectedSubjectId))) {
+                const batchSubjectIds = commonSubjectMap.get(Number(selectedSubjectId)).batch_subject_ids;
+                batchSubjectIds.forEach(id => {
+                    const input = document.createElement('input');
+                    input.type = 'hidden';
+                    input.name = 'batch_subject_id[]';
+                    input.value = id;
+                    form.appendChild(input);
+                });
+            }
+            submitForm(form);
+        });
+        
+        document.getElementById('add-batch-subject-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+            submitForm(this);
+        });
+        
+        document.getElementById('add-subject-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+            submitForm(this);
+        });
+        
+        document.getElementById('add-faculty-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+            submitForm(this);
+        });
+
+        document.getElementById('bulk-form').onsubmit = function(e) {
+            e.preventDefault();
+            const selectedIds = Array.from(document.querySelectorAll('#assignments_tbody input[type="checkbox"]:checked'))
+                .map(cb => cb.value);
+            
+            if (selectedIds.length === 0) {
+                alert("Please select at least one assignment for bulk action.");
+                return;
+            }
+            
+            const bulkForm = document.getElementById('bulk-form');
+            selectedIds.forEach(id => {
+                const input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = 'selected_assignments[]';
+                input.value = id;
+                bulkForm.appendChild(input);
+            });
+
+            submitForm(this);
+        };
+
+        // Tab Navigation Event Listener
+        document.getElementById('sidebar-tabs').addEventListener('click', function(event) {
+            const target = event.target.closest('.nav-link');
+            if (target) {
+                setActiveTab(target.id);
+            }
+        });
+
+        // Event listeners for dynamic forms
+        document.getElementById('batch_assign').addEventListener('change', async function() {
+            const selectedBatchIds = Array.from(this.selectedOptions).map(option => option.value);
+            if (selectedBatchIds.length > 0) {
+                const firstBatch = this.selectedOptions[0];
+                document.getElementById('semester_assign').value = firstBatch.getAttribute('data-semester');
+                // Load subjects and sections based on the new selection
+                await loadSubjectsForMultipleBatches(selectedBatchIds, 'batch_subject_assign');
+                await loadSectionsForMultipleBatches(selectedBatchIds, 'section_assign');
+            } else {
+                document.getElementById('semester_assign').value = '';
+                document.getElementById('batch_subject_assign').innerHTML = '<option value="">-- Select Batch and Semester First --</option>';
+                document.getElementById('section_assign').innerHTML = '<option value="">-- Select Batch First --</option>';
+                document.getElementById('subsection_assign').innerHTML = '<option value="">-- Select Section First --</option>';
+            }
+        });
+        
+        document.getElementById('section_assign').addEventListener('change', function() {
+            const selectedSectionIds = Array.from(this.selectedOptions).map(option => option.value);
+            loadSubsectionsForMultipleSections(selectedSectionIds, 'subsection_assign');
+        });
+        
+        document.getElementById('faculty_school').onchange = function() {
+            loadDepartments('faculty_school', 'faculty_department');
+        };
+        
+        document.getElementById('batch_subject_add_batch').onchange = function() {
+            const selectedOption = this.options[this.selectedIndex];
+            if (selectedOption.value) {
+                document.getElementById('semester_subject_add').value = selectedOption.getAttribute('data-semester');
+            } else {
+                document.getElementById('semester_subject_add').value = '';
+            }
+        };
+
+        // Filters dropdowns
+        document.getElementById('filter_department').onchange = async function() {
+            document.getElementById('filter_academic_year').value = '';
+            await loadFilterBatches();
+            document.getElementById('filter_batch').value = '';
+            document.getElementById('filter_semester').value = '';
+            document.getElementById('filter_section').innerHTML = '<option value="">-- Select Batch First --</option>';
+            loadAssignments();
+        };
+
+        document.getElementById('filter_academic_year').onchange = async function() {
+            document.getElementById('filter_department').value = '';
+            await loadFilterBatches();
+            document.getElementById('filter_batch').value = '';
+            document.getElementById('filter_semester').value = '';
+            document.getElementById('filter_section').innerHTML = '<option value="">-- Select Batch First --</option>';
+            loadAssignments();
+        };
+        
+        document.getElementById('filter_batch').onchange = async function() {
+            var selectedOption = this.options[this.selectedIndex];
+            if (selectedOption.value) {
+                document.getElementById('filter_semester').value = selectedOption.getAttribute('data-semester');
+                await loadFilterSections();
+            } else {
+                document.getElementById('filter_semester').value = '';
+                document.getElementById('filter_section').innerHTML = '<option value="">-- Select Batch First --</option>';
+            }
+            loadAssignments();
+        };
+        
+        document.getElementById('filter_semester').onchange = loadAssignments;
+        document.getElementById('filter_section').onchange = loadAssignments;
+    };
+
+    async function loadDepartments(schoolSelectId, departmentSelectId) {
+        var schoolId = document.getElementById(schoolSelectId).value;
+        var departmentSelect = document.getElementById(departmentSelectId);
+        departmentSelect.innerHTML = '<option value="">-- Select Department --</option>';
+        if (schoolId) {
+            try {
+                const response = await fetch('/api/get_departments_by_school/' + schoolId);
+                const data = await response.json();
+                data.forEach(dept => {
+                    departmentSelect.innerHTML += '<option value="' + dept.department_id + '">' + dept.name + '</option>';
+                });
+            } catch (e) {
+                console.error("Error loading departments:", e);
+            }
+        } else {
+            departmentSelect.innerHTML = '<option value="">-- Select School First --</option>';
+        }
+    }
+
+    async function loadSubjectsForMultipleBatches(batchIds, targetSelectId) {
+        const select = document.getElementById(targetSelectId);
+        select.innerHTML = '';
+        if (batchIds.length === 0) {
+            select.innerHTML = '<option value="">-- Select Batch and Semester First --</option>';
+            return;
+        }
+        
+        const firstBatchSemester = document.getElementById('batch_assign').selectedOptions[0].getAttribute('data-semester');
+        const subjectsInAllBatches = new Map();
+        
+        for (const batchId of batchIds) {
+            try {
+                const response = await fetch(`/api/get_batch_subjects_by_batch_and_semester/${batchId}/${firstBatchSemester}`);
+                const data = await response.json();
+                
+                if (subjectsInAllBatches.size === 0 && batchIds.length > 0) {
+                    data.forEach(subject => {
+                        subjectsInAllBatches.set(subject.subject_id, {
+                            subject_name: subject.subject_name,
+                            subject_code: subject.subject_code,
+                            batch_subject_ids: [subject.batch_subject_id]
+                        });
+                    });
+                } else {
+                    const currentBatchSubjects = new Map(data.map(s => [s.subject_id, s.batch_subject_id]));
+                    const subjectsToRemove = [];
+                    for (let [subjectId, subjectData] of subjectsInAllBatches) {
+                        if (currentBatchSubjects.has(subjectId)) {
+                            subjectData.batch_subject_ids.push(currentBatchSubjects.get(subjectId));
+                        } else {
+                            subjectsToRemove.push(subjectId);
+                        }
+                    }
+                    subjectsToRemove.forEach(subjectId => subjectsInAllBatches.delete(subjectId));
+                }
+            } catch (e) {
+                console.error(`Error fetching subjects for batch ${batchId}:`, e);
+                select.innerHTML = '<option value="">-- Error fetching subjects --</option>';
+                return;
+            }
+        }
+    
+        commonSubjectMap.clear();
+        if (subjectsInAllBatches.size > 0) {
+            select.innerHTML = '<option value="">-- Select Subject --</option>';
+            for (const [subjectId, subjectData] of subjectsInAllBatches) {
+                commonSubjectMap.set(subjectId, subjectData);
+                select.innerHTML += `<option value="${subjectId}">${subjectData.subject_code} - ${subjectData.subject_name}</option>`;
+            }
+        } else {
+            select.innerHTML = '<option value="">-- No common subjects found --</option>';
+        }
+    }
+
+    async function loadSectionsForMultipleBatches(batchIds, targetSelectId) {
+        const select = document.getElementById(targetSelectId);
+        select.innerHTML = '';
+        
+        if (batchIds.length === 0) {
+            select.innerHTML = '<option value="">-- Select Batch First --</option>';
+            return;
+        }
+
+        const uniqueSections = new Map();
+        const fetchPromises = batchIds.map(async batchId => {
+            try {
+                const response = await fetch('/api/get_sections_by_batch/' + batchId);
+                const data = await response.json();
+                data.forEach(section => {
+                    uniqueSections.set(section.section_id, section);
+                });
+            } catch (e) {
+                console.error(`Error fetching sections for batch ${batchId}:`, e);
+            }
+        });
+
+        await Promise.all(fetchPromises);
+        
+        if (uniqueSections.size > 0) {
+            select.innerHTML = '<option value="">-- All Sections --</option>';
+            uniqueSections.forEach(opt => {
+                select.innerHTML += '<option value="' + opt.section_id + '">' + opt.name + '</option>';
+            });
+        } else {
+            select.innerHTML = '<option value="">-- No sections found for selected batches --</option>';
+        }
+    }
+    
+    async function loadSubsectionsForMultipleSections(sectionIds, targetSelectId) {
+        const select = document.getElementById(targetSelectId);
+        select.innerHTML = '';
+        
+        if (sectionIds.length === 0) {
+            select.innerHTML = '<option value="">-- Select Section First --</option>';
+            return;
+        }
+
+        const uniqueSubsections = new Map();
+        const fetchPromises = sectionIds.map(async sectionId => {
+            try {
+                const response = await fetch('/api/get_subsections_by_section/' + sectionId);
+                const data = await response.json();
+                data.forEach(subsection => {
+                    uniqueSubsections.set(subsection.subsection_id, subsection);
+                });
+            } catch (e) {
+                console.error(`Error fetching subsections for section ${sectionId}:`, e);
+            }
+        });
+
+        await Promise.all(fetchPromises);
+        
+        if (uniqueSubsections.size > 0) {
+            select.innerHTML = '<option value="">-- All Subsections --</option>';
+            uniqueSubsections.forEach(opt => {
+                select.innerHTML += '<option value="' + opt.subsection_id + '">' + opt.name + '</option>';
+            });
+        } else {
+            select.innerHTML = '<option value="">-- No subsections found --</option>';
+        }
+    }
+
+    async function loadFilterBatches() {
+        var ayId = document.getElementById('filter_academic_year').value;
+        var deptId = document.getElementById('filter_department').value;
+        var select = document.getElementById('filter_batch');
+        select.innerHTML = '<option value="">-- All Batches --</option>';
+        
+        let url = '';
+        if (ayId && !deptId) {
+            url = '/api/get_batches_by_academic_year/' + ayId;
+        } else if (!ayId && deptId) {
+            url = '/api/get_batches_by_department/' + deptId;
+        } else if (ayId && deptId) {
+             url = '/api/get_batches_by_academic_year_and_department/' + ayId + '/' + deptId;
+        } else {
+            // Load all batches
+            const allBatches = JSON.parse('{{ batches|tojson }}');
+            allBatches.forEach(batch => {
+                select.innerHTML += `<option value="${batch.batch_id}" data-semester="${batch.semester}">${batch.year} (Sem ${batch.semester})</option>`;
+            });
+            return;
+        }
+        
+        try {
+            const response = await fetch(url);
+            const data = await response.json();
+            data.forEach(opt => {
+                select.innerHTML += '<option value="' + opt.batch_id + '" data-semester="' + opt.semester + '">' + opt.display_name + '</option>';
+            });
+        } catch (e) {
+            console.error("Error loading batches for filter:", e);
+        }
+    }
+
+    async function loadFilterSections() {
+        var batchId = document.getElementById('filter_batch').value;
+        var select = document.getElementById('filter_section');
+        select.innerHTML = '<option value="">-- All Sections --</option>';
+        
+        if (batchId) {
+            try {
+                const response = await fetch('/api/get_sections_by_batch/' + batchId);
+                const data = await response.json();
+                data.forEach(opt => {
+                    select.innerHTML += '<option value="' + opt.section_id + '">' + opt.name + '</option>';
+                });
+            } catch (e) {
+                console.error("Error loading sections for filter:", e);
+            }
+        }
+    }
+
+    function loadAssignments() {
+        var department = document.getElementById('filter_department').value;
+        var academic_year = document.getElementById('filter_academic_year').value;
+        var batch = document.getElementById('filter_batch').value;
+        var semester = document.getElementById('filter_semester').value;
+        var section = document.getElementById('filter_section').value;
+
+        var url = '/api/get_faculty_assignments_by_filters?';
+        if (department) url += 'department_id=' + department + '&';
+        if (academic_year) url += 'academic_year_id=' + academic_year + '&';
+        if (batch) url += 'batch_id=' + batch + '&';
+        if (semester) url += 'semester=' + semester + '&';
+        if (section) url += 'section_id=' + section + '&';
+        url = url.slice(0, -1); // Remove trailing '&'
+
+        fetch(url)
+            .then(response => response.json())
+            .then(data => {
+                var tbody = document.getElementById('assignments_tbody');
+                tbody.innerHTML = '';
+                data.forEach(ass => {
+                    var row = '<tr>' +
+                        '<td><input type="checkbox" name="selected_assignments[]" value="' + ass.faculty_subject_id + '"></td>' +
+                        '<td>' + ass.faculty_subject_id + '</td>' +
+                        '<td>' + ass.faculty_name + '</td>' +
+                        '<td>' + ass.batch_year + '</td>' +
+                        '<td>' + ass.semester + '</td>' +
+                        '<td>' + ass.subject_code + ' - ' + ass.subject_name + '</td>' +
+                        '<td>' + ass.section_name + '</td>' +
+                        '<td>' + (ass.subsection_name || '') + '</td>' +
+                        '<td>' +
+                        '<button class="btn btn-sm btn-warning edit-btn" data-table="faculty_subjects" data-pk="faculty_subject_id" data-pk-value="' + ass.faculty_subject_id + '">Edit</button> | ' +
+                        '<a href="#" class="btn btn-sm btn-danger delete-btn" data-id="' + ass.faculty_subject_id + '">Delete</a>' +
+                        '</td>' +
+                        '</tr>';
+                    tbody.innerHTML += row;
+                });
+            });
+    }
+
+    function clearFilters() {
+        document.getElementById('filter_department').value = '';
+        document.getElementById('filter_academic_year').value = '';
+        document.getElementById('filter_batch').value = '';
+        document.getElementById('filter_semester').value = '';
+        document.getElementById('filter_section').value = '';
+        document.getElementById('filter_batch').innerHTML = '<option value="">-- All Batches --</option>';
+        document.getElementById('filter_section').innerHTML = '<option value="">-- All Sections --</option>';
+        loadAssignments();
+    }
+
+    async function deleteAssignment(id) {
+        if (confirm('Are you sure you want to delete this assignment?')) {
+            const response = await fetch('/delete/faculty_subjects?primary_key=faculty_subject_id&primary_value=' + id, { method: 'GET' });
+            const data = await response.json();
+            if (data.message) {
+                console.log(data.message);
+                loadAssignments(); // Reload the table
+            } else {
+                console.error(data.error);
+            }
+        }
+    }
+
+    async function submitForm(form) {
+        const formData = new FormData(form);
+        try {
+            const response = await fetch(form.action, {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            });
+            const data = await response.json();
+            if (data.message) {
+                alert(data.message);
+                form.reset();
+                const tabPane = form.closest('.tab-pane');
+                if (tabPane) {
+                    const tabId = tabPane.getAttribute('id');
+                    if (tabId === 'existing-assignments') {
+                        loadAssignments();
+                    } else if (tabId === 'assign-faculty-subject') {
+                        // Reset dependent dropdowns for this form
+                        document.getElementById('batch_subject_assign').innerHTML = '<option value="">-- Select Batch and Semester First --</option>';
+                        document.getElementById('section_assign').innerHTML = '<option value="">-- Select Batch First --</option>';
+                        document.getElementById('subsection_assign').innerHTML = '<option value="">-- Select Section First --</option>';
+                        document.getElementById('semester_assign').value = '';
+                        document.getElementById('batch_assign').value = ''; 
+                    } else if (tabId === 'add-batch-subject') {
+                        document.getElementById('batch_subject_add_batch').dispatchEvent(new Event('change'));
+                    } else if (tabId === 'add-new-faculty') {
+                        document.getElementById('faculty_school').dispatchEvent(new Event('change'));
+                    }
+                    const tabLink = document.querySelector(`[href="#${tabId}"]`);
+                    if (tabLink) {
+                        setActiveTab(tabLink.id);
+                    }
+                }
+            } else {
+                alert(data.error);
+                console.error(data.error);
+            }
+        } catch (e) {
+            alert("Error submitting form: " + e.message);
+            console.error("Error submitting form:", e);
+        }
+    }
+    
+    // Handle delete buttons using an AJAX-based delete functionality
+    $(document).on('click', '.delete-btn', function(e) {
+        e.preventDefault();
+        var id = $(this).data('id');
+        if (confirm('Are you sure you want to delete this assignment?')) {
+            $.ajax({
+                url: '/delete/faculty_subjects?primary_key=faculty_subject_id&primary_value=' + id,
+                type: 'GET',
+                success: function(response) {
+                    alert(response.message);
+                    loadAssignments(); // Reload the table
+                },
+                error: function(xhr) {
+                    alert('Error deleting record: ' + (xhr.responseJSON ? xhr.responseJSON.error : 'Unknown error'));
+                }
+            });
+        }
+    });
+
+    function toggleSelectAll(source) {
+        var checkboxes = document.querySelectorAll('input[name="selected_assignments[]"]');
+        for (var i = 0; i < checkboxes.length; i++) {
+            checkboxes[i].checked = source.checked;
+        }
+    }
+
+    document.getElementById('bulk_action').onchange = function() {
+        var action = this.value;
+        var applyBtn = document.getElementById('bulk_apply');
+        var newFacultySelect = document.getElementById('new_faculty');
+        if (action === 'reassign') {
+            newFacultySelect.style.display = 'inline';
+            applyBtn.style.display = 'inline';
+        } else {
+            newFacultySelect.style.display = 'none';
+            applyBtn.style.display = 'none';
+        }
+    };
+    
+</script>
+{% endblock %}

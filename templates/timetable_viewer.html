@@ -1,0 +1,705 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NMIMS Timetable Management - {{ current_school.abbreviation }}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --nmims-blue: #1e3a8a;
+            --nmims-light-blue: #3b82f6;
+            --nmims-orange: #f97316;
+            --stme-color: #059669;
+            --soc-color: #dc2626;
+            --sbm-color: #7c3aed;
+            --sptm-color: #ea580c;
+        }
+        
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        .dashboard-header {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            margin-bottom: 2rem;
+        }
+        
+        .school-badge {
+            background: linear-gradient(135deg, var(--stme-color), #10b981);
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 25px;
+            font-weight: 600;
+            font-size: 0.9rem;
+        }
+        
+        .card {
+            border: none;
+            border-radius: 15px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            backdrop-filter: blur(10px);
+            background: rgba(255, 255, 255, 0.95);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+        }
+        
+        .selection-step {
+            background: linear-gradient(135deg, #f8fafc, #e2e8f0);
+            border-radius: 10px;
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+            border-left: 4px solid var(--nmims-blue);
+            transition: all 0.3s ease;
+        }
+        
+        .selection-step.active {
+            background: linear-gradient(135deg, #dbeafe, #bfdbfe);
+            border-left-color: var(--nmims-orange);
+            transform: translateX(5px);
+        }
+        
+        .selection-step.completed {
+            background: linear-gradient(135deg, #d1fae5, #a7f3d0);
+            border-left-color: var(--stme-color);
+        }
+        
+        .step-number {
+            width: 30px;
+            height: 30px;
+            background: var(--nmims-blue);
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            margin-right: 1rem;
+        }
+        
+        .step-number.active {
+            background: var(--nmims-orange);
+            animation: pulse 2s infinite;
+        }
+        
+        .step-number.completed {
+            background: var(--stme-color);
+        }
+        
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+            100% { transform: scale(1); }
+        }
+        
+        .form-select, .form-control {
+            border-radius: 10px;
+            border: 2px solid #e5e7eb;
+            padding: 12px 16px;
+            transition: border-color 0.3s ease;
+        }
+        
+        .form-select:focus, .form-control:focus {
+            border-color: var(--nmims-blue);
+            box-shadow: 0 0 0 0.2rem rgba(30, 58, 138, 0.25);
+        }
+        
+        .btn-primary {
+            background: var(--nmims-blue);
+            border: none;
+            border-radius: 10px;
+            padding: 12px 24px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+        
+        .btn-primary:hover {
+            background: var(--nmims-light-blue);
+            transform: translateY(-2px);
+        }
+        
+        .btn-success {
+            background: var(--stme-color);
+            border: none;
+            border-radius: 10px;
+            padding: 12px 24px;
+            font-weight: 600;
+        }
+        
+        .btn-warning {
+            background: var(--nmims-orange);
+            border: none;
+            border-radius: 10px;
+            padding: 12px 24px;
+            font-weight: 600;
+        }
+        
+        .school-switcher {
+            background: rgba(255, 255, 255, 0.9);
+            border-radius: 10px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+        }
+        
+        .progress-indicator {
+            height: 6px;
+            background: #e5e7eb;
+            border-radius: 3px;
+            overflow: hidden;
+            margin-bottom: 1rem;
+        }
+        
+        .progress-bar-custom {
+            height: 100%;
+            background: linear-gradient(90deg, var(--nmims-blue), var(--nmims-orange));
+            border-radius: 3px;
+            transition: width 0.5s ease;
+        }
+        
+        .selection-summary {
+            background: linear-gradient(135deg, #fef3c7, #fde68a);
+            border-radius: 10px;
+            padding: 1rem;
+            margin-top: 1rem;
+        }
+        
+        .alert {
+            border-radius: 10px;
+            border: none;
+        }
+        
+        .loading-spinner {
+            display: none;
+            text-align: center;
+            padding: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid py-4">
+        <!-- Header -->
+        <div class="dashboard-header p-4 mb-4">
+            <div class="row align-items-center">
+                <div class="col-md-8">
+                    <h1 class="mb-2">
+                        <i class="fas fa-calendar-alt text-primary me-3"></i>
+                        NMIMS Timetable Management System
+                    </h1>
+                    <div class="d-flex align-items-center">
+                        <span class="school-badge me-3">{{ current_school.abbreviation }}</span>
+                        <p class="text-muted mb-0">{{ current_school.name }}</p>
+                    </div>
+                </div>
+                <div class="col-md-4 text-end">
+                    <div class="school-switcher">
+                        <label class="form-label small">Switch School:</label>
+                        <select class="form-select form-select-sm" id="schoolSwitcher">
+                            {% for school in schools %}
+                                <option value="{{ school.school_id }}" 
+                                        {% if school.school_id == current_school.school_id %}selected{% endif %}>
+                                    {{ school.abbreviation }} - {{ school.name }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Flash Messages -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ 'danger' if category == 'error' else category }} alert-dismissible fade show" role="alert">
+                        <i class="fas fa-{{ 'exclamation-triangle' if category == 'error' else 'check-circle' if category == 'success' else 'info-circle' }} me-2"></i>
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        
+
+            
+           <div class="row">
+    <!-- Hierarchical Selection Panel -->
+    <div class="col-lg-7"> <!-- Changed from col-lg-8 to col-lg-7 -->
+        <div class="card mb-4">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0">
+                    <i class="fas fa-filter me-2"></i>
+                    Hierarchical Selection
+                </h5>
+            </div>
+            <div class="card-body">
+                <!-- Progress Indicator -->
+                <div class="progress-indicator">
+                    <div class="progress-bar-custom" id="progressBar" style="width: 20%"></div>
+                </div>
+                
+                <form id="hierarchicalForm" action="/generate_timetable" method="GET">
+                    <!-- Step 1: School (Pre-selected) -->
+                    <div class="selection-step completed" id="step1">
+                        <div class="d-flex align-items-center">
+                            <div class="step-number completed">1</div>
+                            <div class="flex-grow-1">
+                                <h6 class="mb-1">School Selected</h6>
+                                <p class="mb-0 text-muted">{{ current_school.name }} ({{ current_school.abbreviation }})</p>
+                                <input type="hidden" name="school_id" value="{{ current_school.school_id }}">
+                            </div>
+                            <i class="fas fa-check-circle text-success fa-lg"></i>
+                        </div>
+                    </div>
+
+                    <!-- Step 2: Department -->
+                    <div class="selection-step active" id="step2">
+                        <div class="d-flex align-items-center">
+                            <div class="step-number active">2</div>
+                            <div class="flex-grow-1">
+                                <h6 class="mb-2">Select Department</h6>
+                                <select class="form-select" id="departmentSelect" name="department_id" required>
+                                    <option value="">Choose Department...</option>
+                                    {% for dept in departments %}
+                                        <option value="{{ dept.department_id }}">{{ dept.name }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Step 3: Academic Year -->
+                    <div class="selection-step" id="step3">
+                        <div class="d-flex align-items-center">
+                            <div class="step-number">3</div>
+                            <div class="flex-grow-1">
+                                <h6 class="mb-2">Select Academic Year (Optional for Bulk Dept)</h6>
+                                <select class="form-select" id="yearSelect" name="year_id" disabled>
+                                    <option value="">Choose Academic Year...</option>
+                                    {% for year in academic_years %}
+                                        <option value="{{ year.year_id }}" 
+                                                {% if year.is_current %}selected{% endif %}>
+                                            {{ year.year_name }}
+                                            {% if year.is_current %} (Current){% endif %}
+                                        </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Step 4: Semester -->
+                    <div class="selection-step" id="step4">
+                        <div class="d-flex align-items-center">
+                            <div class="step-number">4</div>
+                            <div class="flex-grow-1">
+                                <h6 class="mb-2">Select Semester (Optional for Bulk Dept)</h6>
+                                <select class="form-select" id="semesterSelect" name="semester" disabled>
+                                    <option value="">Choose Semester...</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Step 5: Section -->
+                    <div class="selection-step" id="step5">
+                        <div class="d-flex align-items-center">
+                            <div class="step-number">5</div>
+                            <div class="flex-grow-1">
+                                <h6 class="mb-2">Select Section (Optional for Bulk Dept)</h6>
+                                <select class="form-select" id="sectionSelect" name="section_id" disabled>
+                                    <option value="">Choose Section...</option>
+                                </select>
+                                <div class="loading-spinner" id="sectionsLoading">
+                                    <i class="fas fa-spinner fa-spin me-2"></i>Loading sections...
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Selection Summary -->
+                    <div class="selection-summary" id="selectionSummary" style="display: none;">
+                        <h6><i class="fas fa-info-circle me-2"></i>Selection Summary</h6>
+                        <div id="summaryContent"></div>
+                    </div>
+
+                    <!-- Action Buttons -->
+                    <div class="row mt-4">
+                        <div class="col-12">
+                            <div class="d-grid gap-2 d-md-flex justify-content-md-end">
+                                <button type="submit" class="btn btn-primary btn-lg me-md-2" id="generateBtn" disabled>
+                                    <i class="fas fa-cogs me-2"></i>Generate Timetable
+                                </button>
+                                <button type="button" class="btn btn-success btn-lg" id="bulkGenerateBtn" disabled>
+                                    <i class="fas fa-layer-group me-2"></i>Bulk Generate
+                                </button>
+                                <button type="button" class="btn btn-warning btn-lg text-white" id="exportCsvBtn" disabled>
+                                    <i class="fas fa-file-csv me-2"></i>Export to CSV
+                                </button>
+                                <a href="{{ url_for('generation_logs') }}" class="btn btn-info btn-lg text-white">
+                                    <i class="fas fa-history me-2"></i>View Past Timetable Logs
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Information Panel -->
+    <div class="col-lg-5"> <!-- Changed from col-lg-4 to col-lg-5 -->
+        <div class="card mb-4">
+            <div class="card-header bg-success text-white">
+                <h5 class="mb-0">
+                    <i class="fas fa-info-circle me-2"></i>
+                    {{ current_school.abbreviation }} Information
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <h6><i class="fas fa-building text-success me-2"></i>Available Departments</h6>
+                    <div class="row">
+                        {% for dept in departments %}
+                            <div class="col-12 mb-1">
+                                <small class="badge bg-light text-dark">{{ dept.name }}</small>
+                            </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                
+                <div class="mb-3">
+                    <h6><i class="fas fa-calendar text-primary me-2"></i>Academic Years</h6>
+                    <div class="row text-center">
+                        {% for year in academic_years %}
+                            <div class="col-12 mb-2">
+                                <div class="border rounded p-2 {{ 'bg-primary text-white' if year.is_current else '' }}">
+                                    <strong>{{ year.year_name }}</strong>
+                                    {% if year.is_current %}<br><small>Current</small>{% endif %}
+                                </div>
+                            </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header bg-warning text-white">
+                <h5 class="mb-0">
+                    <i class="fas fa-lightbulb me-2"></i>
+                    Selection Guide
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="alert alert-info">
+                    <small>
+                        <strong>Step-by-Step:</strong><br>
+                        1. Department is filtered by your school<br>
+                        2. Select the department<br>
+                        3. Choose academic year (Optional)<br>
+                        4. Pick semester (Optional)<br>
+                        5. Select specific section (Optional)<br><br>
+                        <i class="fas fa-magic me-1"></i>
+                        The system will automatically generate optimized timetables 
+                        respecting all faculty and resource constraints.
+                        <br><br>
+                        <i class="fas fa-info-circle me-1"></i>
+                        For **Bulk Generate**, select only Department to generate for all sections in that department.
+                    </small>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+        <!-- Moved View Past Timetable Logs button here, outside the main row for better visibility -->
+        
+
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let currentStep = 2;
+        let selectedData = {
+            school_id: {{ current_school.school_id }},
+            department_id: null,
+            year_id: null,
+            semester: null,
+            section_id: null
+        };
+
+        // School switcher
+        document.getElementById('schoolSwitcher').addEventListener('change', function() {
+            const schoolId = this.value;
+            window.location.href = `/?school_id=${schoolId}`;
+        });
+
+        // Department selection
+        document.getElementById('departmentSelect').addEventListener('change', function() {
+            const deptId = this.value;
+            selectedData.department_id = deptId;
+            
+            if (deptId) {
+                completeStep(2);
+                activateStep(3);
+                document.getElementById('yearSelect').disabled = false; // Enable year select
+                document.getElementById('yearSelect').value = ""; // Reset year
+                document.getElementById('semesterSelect').value = ""; // Reset semester
+                document.getElementById('sectionSelect').value = ""; // Reset section
+                document.getElementById('semesterSelect').disabled = true; // Disable semester
+                document.getElementById('sectionSelect').disabled = true; // Disable section
+                updateProgress(40);
+                // Enable bulk generate and export CSV as department is selected
+                document.getElementById('bulkGenerateBtn').disabled = false;
+                document.getElementById('exportCsvBtn').disabled = false;
+            } else {
+                resetFromStep(3);
+                document.getElementById('bulkGenerateBtn').disabled = true; // Disable if no department
+                document.getElementById('exportCsvBtn').disabled = true; // Disable if no department
+            }
+            updateActionButtons();
+        });
+
+        // Year selection
+        document.getElementById('yearSelect').addEventListener('change', function() {
+            const yearId = this.value;
+            selectedData.year_id = yearId;
+            
+            if (yearId) {
+                completeStep(3);
+                activateStep(4);
+                loadSemesters(yearId);
+                updateProgress(60);
+                document.getElementById('semesterSelect').value = ""; // Reset semester
+                document.getElementById('sectionSelect').value = ""; // Reset section
+                document.getElementById('sectionSelect').disabled = true; // Disable section
+            } else {
+                resetFromStep(4);
+                selectedData.semester = null; // Clear semester if year is cleared
+                selectedData.section_id = null; // Clear section if year is cleared
+            }
+            updateActionButtons();
+        });
+
+        // Semester selection
+        document.getElementById('semesterSelect').addEventListener('change', function() {
+            const semester = this.value;
+            selectedData.semester = semester;
+            
+            if (semester) {
+                completeStep(4);
+                activateStep(5);
+                loadSections();
+                updateProgress(80);
+                document.getElementById('sectionSelect').value = ""; // Reset section
+            } else {
+                resetFromStep(5);
+                selectedData.section_id = null; // Clear section if semester is cleared
+            }
+            updateActionButtons();
+        });
+
+        // Section selection
+        document.getElementById('sectionSelect').addEventListener('change', function() {
+            const sectionId = this.value;
+            selectedData.section_id = sectionId;
+            
+            if (sectionId) {
+                completeStep(5);
+                updateProgress(100);
+                showSelectionSummary();
+            } else {
+                hideSelectionSummary();
+            }
+            updateActionButtons();
+        });
+
+        function loadSemesters(yearId) {
+            fetch(`/api/semesters/${yearId}`)
+                .then(response => response.json())
+                .then(semesters => {
+                    const semesterSelect = document.getElementById('semesterSelect');
+                    semesterSelect.innerHTML = '<option value="">Choose Semester...</option>';
+                    
+                    semesters.forEach(sem => {
+                        semesterSelect.innerHTML += `<option value="${sem.semester}">Semester ${sem.semester}</option>`;
+                    });
+                    
+                    semesterSelect.disabled = false;
+                })
+                .catch(error => {
+                    console.error('Error loading semesters:', error);
+                });
+        }
+
+        function loadSections() {
+            const loading = document.getElementById('sectionsLoading');
+            loading.style.display = 'block';
+            
+            const params = new URLSearchParams({
+                school_id: selectedData.school_id,
+                department_id: selectedData.department_id,
+                year_id: selectedData.year_id || '', // Pass empty string if null for API
+                semester: selectedData.semester || '' // Pass empty string if null for API
+            });
+            
+            fetch(`/api/sections?${params}`)
+                .then(response => response.json())
+                .then(sections => {
+                    const sectionSelect = document.getElementById('sectionSelect');
+                    sectionSelect.innerHTML = '<option value="">Choose Section...</option>';
+                    
+                    sections.forEach(section => {
+                        sectionSelect.innerHTML += `
+                            <option value="${section.section_id}">
+                                ${section.section_name} (${section.total_students || 'N/A'} students)
+                            </option>`;
+                    });
+                    
+                    sectionSelect.disabled = false;
+                    loading.style.display = 'none';
+                })
+                .catch(error => {
+                    console.error('Error loading sections:', error);
+                    loading.style.display = 'none';
+                });
+        }
+
+        function completeStep(stepNum) {
+            const step = document.getElementById(`step${stepNum}`);
+            const stepNumber = step.querySelector('.step-number');
+            
+            step.classList.remove('active');
+            step.classList.add('completed');
+            stepNumber.classList.remove('active');
+            stepNumber.classList.add('completed');
+        }
+
+        function activateStep(stepNum) {
+            const step = document.getElementById(`step${stepNum}`);
+            const stepNumber = step.querySelector('.step-number');
+            
+            step.classList.add('active');
+            stepNumber.classList.add('active');
+            currentStep = stepNum;
+        }
+
+        function resetFromStep(stepNum) {
+            for (let i = stepNum; i <= 5; i++) {
+                const step = document.getElementById(`step${i}`);
+                const stepNumber = step.querySelector('.step-number');
+                
+                step.classList.remove('active', 'completed');
+                stepNumber.classList.remove('active', 'completed');
+                
+                // Disable corresponding selects and reset their values
+                if (i === 3) {
+                    document.getElementById('yearSelect').disabled = true;
+                    document.getElementById('yearSelect').value = "";
+                    selectedData.year_id = null;
+                }
+                if (i === 4) {
+                    document.getElementById('semesterSelect').disabled = true;
+                    document.getElementById('semesterSelect').innerHTML = '<option value="">Choose Semester...</option>'; // Clear semesters
+                    selectedData.semester = null;
+                }
+                if (i === 5) {
+                    document.getElementById('sectionSelect').disabled = true;
+                    document.getElementById('sectionSelect').innerHTML = '<option value="">Choose Section...</option>'; // Clear sections
+                    selectedData.section_id = null;
+                }
+            }
+            
+            hideSelectionSummary();
+        }
+
+        function updateProgress(percentage) {
+            document.getElementById('progressBar').style.width = percentage + '%';
+        }
+
+        function showSelectionSummary() {
+            const summary = document.getElementById('selectionSummary');
+            const content = document.getElementById('summaryContent');
+            
+            const deptName = document.getElementById('departmentSelect').selectedOptions[0].text;
+            const yearSelect = document.getElementById('yearSelect');
+            const yearName = yearSelect.value ? yearSelect.selectedOptions[0].text : 'All Years';
+            const semesterSelect = document.getElementById('semesterSelect');
+            const semester = semesterSelect.value ? semesterSelect.value : 'All Semesters';
+            const sectionSelect = document.getElementById('sectionSelect');
+            const sectionName = sectionSelect.value ? sectionSelect.selectedOptions[0].text : 'All Sections';
+            
+            content.innerHTML = `
+                <div class="row">
+                    <div class="col-6"><strong>School:</strong> {{ current_school.abbreviation }}</div>
+                    <div class="col-6"><strong>Department:</strong> ${deptName}</div>
+                    <div class="col-6"><strong>Year:</strong> ${yearName}</div>
+                    <div class="col-6"><strong>Semester:</strong> ${semester}</div>
+                    <div class="col-12"><strong>Section:</strong> ${sectionName}</div>
+                </div>
+            `;
+            
+            summary.style.display = 'block';
+        }
+
+        function hideSelectionSummary() {
+            document.getElementById('selectionSummary').style.display = 'none';
+        }
+
+        function updateActionButtons() {
+            const generateBtn = document.getElementById('generateBtn');
+            const bulkGenerateBtn = document.getElementById('bulkGenerateBtn');
+            const exportCsvBtn = document.getElementById('exportCsvBtn');
+
+            // Enable Generate only if a specific section is chosen
+            generateBtn.disabled = !selectedData.section_id;
+
+            // Enable Bulk Generate and Export CSV if at least a department is chosen
+            const isDepartmentSelected = selectedData.department_id !== null && selectedData.department_id !== '';
+            bulkGenerateBtn.disabled = !isDepartmentSelected;
+            exportCsvBtn.disabled = !isDepartmentSelected;
+        }
+
+        // Initial state update
+        updateActionButtons();
+
+
+        // Bulk generate handler
+        document.getElementById('bulkGenerateBtn').addEventListener('click', function() {
+            if (confirm('Generate timetables for the selected criteria (Department, Year, Semester, Section). This may take several minutes.')) {
+                const params = new URLSearchParams({
+                    school_id: selectedData.school_id,
+                    department_id: selectedData.department_id,
+                    year_id: selectedData.year_id || '', // Send empty string if null for API to interpret as "all"
+                    semester: selectedData.semester || '' // Send empty string if null for API to interpret as "all"
+                });
+                window.location.href = `/bulk_generate?${params}`;
+            }
+        });
+
+        // Export CSV handler
+        document.getElementById('exportCsvBtn').addEventListener('click', function() {
+            if (confirm('Export timetables for the selected criteria (Department, Year, Semester, Section) to CSV?')) {
+                const params = new URLSearchParams({
+                    school_id: selectedData.school_id,
+                    department_id: selectedData.department_id,
+                    year_id: selectedData.year_id || '', // Send empty string if null for API to interpret as "all"
+                    semester: selectedData.semester || '' // Send empty string if null for API to interpret as "all"
+                });
+                window.location.href = `/export_timetables_csv?${params}`;
+            }
+        });
+
+    </script>
+
+</body>
+</html>

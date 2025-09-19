@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Generated Timetable</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <h1>Generated Timetable</h1>
+    <table border="1">
+        <tr>
+            <th>Section</th>
+            <th>Faculty</th>
+            <th>Subject</th>
+            <th>Timeslot</th>
+        </tr>
+        {% for entry in timetable %}
+        <tr>
+            <td>{{ entry.section_id }}</td>
+            <td>{{ entry.faculty_id }}</td>
+            <td>{{ entry.batch_subject_id }}</td>
+            <td>{{ entry.timeslot_id }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+</body>
+</html>

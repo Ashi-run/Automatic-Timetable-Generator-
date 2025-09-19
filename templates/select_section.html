@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+<head><title>Select Section</title></head>
+<body>
+  {% if departments %}
+    <form action="/sections" method="get">
+      <label>Select Department:</label>
+      <select name="department_id">
+        {% for dept in departments %}
+          <option value="{{ dept.department_id }}">{{ dept.name }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit">Next</button>
+    </form>
+  {% endif %}
+
+  {% if sections %}
+    <form action="/timetable" method="get">
+      <input type="hidden" name="department_id" value="{{ selected_dept }}">
+      <label>Select Section:</label>
+      <select name="section_id">
+        {% for section in sections %}
+          <option value="{{ section.section_id }}">{{ section.name }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit">Generate Timetable</button>
+    </form>
+  {% endif %}
+</body>
+</html>
+
+
+# -------------------------
+# File: templates/timetable.html
+# -------------------------
+<!DOCTYPE html>
+<html>
+<head><title>Generated Timetable</title></head>
+<body>
+<h1>Timetable</h1>
+<table border="1">
+  <tr>
+    <th>Section</th>
+    <th>Faculty</th>
+    <th>Subject</th>
+    <th>Day</th>
+    <th>Time</th>
+  </tr>
+  {% for entry in timetable %}
+  <tr>
+    <td>{{ entry.section_id }}</td>
+    <td>{{ entry.faculty_name }}</td>
+    <td>{{ entry.subject_name }}</td>
+    <td>{{ entry.day }}</td>
+    <td>{{ entry.start }} - {{ entry.end }}</td>
+  </tr>
+  {% endfor %}
+</table>
+</body>
+</html>

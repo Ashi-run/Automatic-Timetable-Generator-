@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+    <h2 class="h2">Faculty Dashboard - Welcome, {{ user_name }}!</h2>
+</div>
+
+<div class="alert alert-info">
+    <h4><i class="bi bi-info-circle"></i> Your Faculty Overview</h4>
+    <p>This dashboard provides a summary of your assigned subjects and other relevant information.</p>
+</div>
+
+<div class="row">
+    <div class="col-md-12">
+        <div class="card mb-4">
+            <div class="card-header">
+                <i class="bi bi-book"></i> Your Assigned Subjects
+            </div>
+            <div class="card-body">
+                {% if faculty_assignments %}
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover compact" id="facultyAssignmentsTable">
+                        <thead>
+                            <tr>
+                                <th>Subject Name</th>
+                                <th>Subject Code</th>
+                                <th>Batch Year</th>
+                                <th>Semester</th>
+                                <th>Section</th>
+                                <th>Subsection</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for assignment in faculty_assignments %}
+                            <tr>
+                                <td>{{ assignment.subject_name }}</td>
+                                <td>{{ assignment.subject_code }}</td>
+                                <td>{{ assignment.batch_year }}</td>
+                                <td>{{ assignment.semester }}</td>
+                                <td>{{ assignment.section_name }}</td>
+                                <td>{{ assignment.subsection_name if assignment.subsection_name else 'N/A' }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <p class="text-muted">No subjects currently assigned to you.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+{# You can add more faculty-specific sections here #}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+    $(document).ready(function() {
+        $('#facultyAssignmentsTable').DataTable({
+            "paging": true,
+            "searching": true,
+            "ordering": true,
+            "info": true,
+            "responsive": true
+        });
+    });
+</script>
+{% endblock %}

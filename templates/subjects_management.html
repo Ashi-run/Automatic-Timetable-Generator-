@@ -1,0 +1,514 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+    <h1 class="h2">Manage Subjects</h1>
+    <button type="button" class="btn btn-info" data-bs-toggle="modal" data-bs-target="#creditRulesModal">
+        <i class="bi bi-gear"></i> Configure Credit Rules
+    </button>
+</div>
+
+<div class="form-container mb-4">
+    <h4>Add New Subject</h4>
+    <form id="add-subject-form" action="{{ url_for('add_record', table_name='subjects') }}" method="POST">
+        <div class="row">
+            <div class="col-md-4 mb-3">
+                <label for="subject_code" class="form-label">Subject Code <span class="text-danger">*</span></label>
+                <input type="text" class="form-control" id="subject_code" name="subject_code" placeholder="e.g., CSE101" required>
+            </div>
+            <div class="col-md-4 mb-3">
+                <label for="name" class="form-label">Subject Name <span class="text-danger">*</span></label>
+                <input type="text" class="form-control" id="name" name="name" required>
+            </div>
+            <div class="col-md-4 mb-3">
+                <label for="credits" class="form-label">Credits <span class="text-danger">*</span></label>
+                <input type="number" class="form-control" id="credits" name="credits" value="3" min="0" required>
+            </div>
+            <div class="col-md-4 mb-3">
+                <label for="has_lab" class="form-label">Has Lab?</label>
+                <select class="form-select" id="has_lab" name="has_lab">
+                    <option value="0">No</option>
+                    <option value="1">Yes</option>
+                </select>
+            </div>
+            <div class="col-md-4 mb-3" id="lab-details-container" style="display: none;">
+                <label for="lab_duration_hours" class="form-label">Lab Duration (hours)</label>
+                <select class="form-select" id="lab_duration_hours" name="lab_duration_hours">
+                    <option value="1.0">1.0 Hour</option>
+                    <option value="2.0">2.0 Hours (Default)</option>
+                    <option value="3.0">3.0 Hours</option>
+                </select>
+            </div>
+            <div class="col-md-4 mb-3" id="continuous-lab-container" style="display: none;">
+                <div class="form-check form-switch mt-4 pt-1">
+                    <input class="form-check-input" type="checkbox" id="is_lab_continuous" name="is_lab_continuous" value="1" checked>
+                    <label class="form-check-label" for="is_lab_continuous">Is Lab Continuous?</label>
+                </div>
+            </div>
+            <div class="col-md-4 mb-3">
+                <label for="exam_type" class="form-label">Exam Type <span class="text-danger">*</span></label>
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="exam_type" id="examExternal" value="External" checked>
+                    <label class="form-check-label" for="examExternal">Term End Exam</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="exam_type" id="examInternal" value="Internal">
+                    <label class="form-check-label" for="examInternal">Internal Only</label>
+                </div>
+            </div>
+            <div class="col-md-4 mb-3" id="lab-room-container" style="display: none;">
+                <label for="preferred_lab_room_id" class="form-label">Preferred Lab Room</label>
+                <select class="form-select" id="preferred_lab_room_id" name="preferred_lab_room_id">
+                    <option value="">-- Select Room --</option>
+                    {% for room in lab_rooms %}
+                    <option value="{{ room.room_id }}">{{ room.room_number }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+        <button type="submit" class="btn btn-primary">Add Subject</button>
+    </form>
+</div>
+
+<div class="table-container">
+    <h4>Existing Subjects</h4>
+    <div class="table-responsive">
+        <table id="subjectsTable" class="table table-striped table-hover compact">
+            <thead>
+                <tr>
+                    <th>Subject ID</th>
+                    <th>Code</th>
+                    <th>Name</th>
+                    <th>Credits</th>
+                    <th>Theory Sessions/Wk</th>
+                    <th>Lab Sessions/Wk</th>
+                    <th>Lab Duration (hrs)</th>
+                    <th>Is Lab Continuous</th>
+                    <th>Has Lab</th>
+                    <th>Preferred Lab Room</th>
+                    <th>Exam Type</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for subject in subjects %}
+                <tr>
+                    <td>{{ subject.subject_id }}</td>
+                    <td>{{ subject.subject_code }}</td>
+                    <td>{{ subject.name }}</td>
+                    <td>{{ subject.credits }}</td>
+                    <td>{{ subject.theory_sessions_per_week if subject.theory_sessions_per_week is not none else 'N/A' }}</td>
+                    <td>{{ subject.lab_sessions_per_week if subject.lab_sessions_per_week is not none else 'N/A' }}</td>
+                    <td>{{ subject.lab_duration_hours if subject.lab_duration_hours is not none else 'N/A' }}</td>
+                    <td>{{ 'Yes' if subject.is_lab_continuous else 'No' }}</td>
+                    <td>{{ 'Yes' if subject.has_lab else 'No' }}</td>
+                    <td>{{ subject.preferred_lab_room_number if subject.preferred_lab_room_number else 'N/A' }}</td>
+                    <td>{{ subject.exam_type }}</td>
+                    <td>
+                        <button class="btn btn-sm btn-warning edit-subject-btn"
+                                data-subject-id="{{ subject.subject_id }}">
+                            <i class="bi bi-pencil"></i> Edit
+                        </button>
+                        <a href="{{ url_for('delete_record', table_name='subjects', primary_key='subject_id', primary_value=subject.subject_id) }}"
+                           class="btn btn-sm btn-danger delete-btn">
+                            <i class="bi bi-trash"></i> Delete
+                        </a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="modal fade" id="creditRulesModal" tabindex="-1" aria-labelledby="creditRulesModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="creditRulesModalLabel">Configure Credit-to-Session Rules</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted">Set the default number of theory and lab sessions per week for each credit value. These values will be used automatically when adding new subjects.</p>
+                <div id="credit-rules-container">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                <button type="button" id="save-rules-btn" class="btn btn-primary">Save Changes</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+    $(document).ready(function() {
+        // Initialize DataTables
+        const subjectsTable = $('#subjectsTable').DataTable({
+            "paging": true,
+            "searching": true,
+            "ordering": true,
+            "info": true,
+            "responsive": true
+        });
+
+        // Function to load and display credit-to-session rules in the modal
+        function loadCreditRules() {
+            $.ajax({
+                url: '/api/get_credit_rules',
+                type: 'GET',
+                success: function(rules) {
+                    const container = $('#credit-rules-container');
+                    container.empty();
+                    
+                    for (let i = 1; i <= 4; i++) {
+                        const rule = rules.find(r => r.credits === i);
+                        const theorySessions = rule ? rule.theory_sessions : '';
+                        const labSessions = rule ? rule.lab_sessions : '';
+                        container.append(createRuleInput(i, theorySessions, labSessions));
+                    }
+                },
+                error: function(err) {
+                    console.error("Error loading credit rules:", err);
+                    const container = $('#credit-rules-container');
+                    container.empty();
+                    for (let i = 1; i <= 4; i++) {
+                        container.append(createRuleInput(i, '', ''));
+                    }
+                }
+            });
+        }
+
+        function createRuleInput(credits, theorySessions, labSessions) {
+            return `
+                <div class="row mb-2">
+                    <div class="col-md-3">
+                        <label class="form-label"><strong>${credits} Credit Subject</strong></label>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="input-group">
+                            <span class="input-group-text">Theory/Wk</span>
+                            <input type="number" class="form-control credit-rule-theory" data-credits="${credits}" value="${theorySessions}" min="0">
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="input-group">
+                            <span class="input-group-text">Lab/Wk</span>
+                            <input type="number" class="form-control credit-rule-lab" data-credits="${credits}" value="${labSessions}" min="0">
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        $('#save-rules-btn').on('click', function() {
+            const rules = [];
+            $('.credit-rule-theory').each(function() {
+                const credits = $(this).data('credits');
+                const theorySessions = $(this).val();
+                const labSessions = $(`.credit-rule-lab[data-credits="${credits}"]`).val();
+                rules.push({ credits: credits, theory_sessions: theorySessions, lab_sessions: labSessions });
+            });
+            
+            $.ajax({
+                url: '/api/save_credit_rules',
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ rules: rules }),
+                success: function(response) {
+                    alert(response.message);
+                    $('#creditRulesModal').modal('hide');
+                },
+                error: function(err) {
+                    alert('Error saving rules: ' + (err.responseJSON ? err.responseJSON.error : 'Unknown error'));
+                }
+            });
+        });
+
+        $('#has_lab').change(function() {
+            if ($(this).val() === '1') {
+                $('#lab-details-container').show();
+                $('#continuous-lab-container').show();
+                $('#lab-room-container').show();
+            } else {
+                $('#lab-details-container').hide();
+                $('#continuous-lab-container').hide();
+                $('#lab-room-container').hide();
+            }
+        }).trigger('change');
+
+        $('#add-subject-form').submit(function(event) {
+            event.preventDefault(); 
+            const form = $(this);
+            const actionUrl = form.attr('action');
+            
+            const credits = $('#credits').val();
+            const hasLab = $('#has_lab').val() === '1';
+
+            // Fetch credit rules and set session values
+            $.ajax({
+                url: '/api/get_credit_rules',
+                type: 'GET',
+                async: false,
+                success: function(rules) {
+                    const rule = rules.find(r => r.credits == credits);
+                    if (rule) {
+                        $('<input>').attr({
+                            type: 'hidden',
+                            name: 'theory_sessions_per_week',
+                            value: rule.theory_sessions
+                        }).appendTo(form);
+                        
+                        if(hasLab) {
+                            $('<input>').attr({
+                                type: 'hidden',
+                                name: 'lab_sessions_per_week',
+                                value: rule.lab_sessions
+                            }).appendTo(form);
+                        } else {
+                           $('<input>').attr({
+                                type: 'hidden',
+                                name: 'lab_sessions_per_week',
+                                value: '0'
+                            }).appendTo(form);
+                        }
+                    } else {
+                        // Fallback if no rule is found for the given credits
+                        $('<input>').attr({
+                            type: 'hidden',
+                            name: 'theory_sessions_per_week',
+                            value: '0'
+                        }).appendTo(form);
+                        $('<input>').attr({
+                            type: 'hidden',
+                            name: 'lab_sessions_per_week',
+                            value: '0'
+                        }).appendTo(form);
+                    }
+                },
+                error: function(xhr) {
+                    console.error('Error fetching credit rules:', xhr);
+                    $('<input>').attr({ type: 'hidden', name: 'theory_sessions_per_week', value: '0' }).appendTo(form);
+                    $('<input>').attr({ type: 'hidden', name: 'lab_sessions_per_week', value: '0' }).appendTo(form);
+                }
+            });
+            
+            const formData = form.serialize();
+
+            $.ajax({
+                url: actionUrl,
+                type: 'POST',
+                data: formData,
+                dataType: 'json',
+                success: function(response) {
+                    showCustomAlert(response.message, 'success');
+                    form[0].reset();
+                    window.location.reload(); 
+                },
+                error: function(xhr) {
+                    const errorMessage = xhr.responseJSON ? xhr.responseJSON.error : 'An unexpected error occurred.';
+                    showCustomAlert(errorMessage, 'error');
+                }
+            });
+        });
+
+        $('#subjectsTable tbody').on('click', '.edit-subject-btn', function() {
+            const subjectId = $(this).data('subject-id');
+
+            $.ajax({
+                url: `/get_row/subjects?primary_key=subject_id&primary_value=${subjectId}`,
+                type: 'GET',
+                success: function(row) {
+                    // Fetch and populate lab rooms dropdown
+                    $.get('/api/get_rooms_by_type/Lab', function(rooms) {
+                        populateSubjectEditModal(row, rooms);
+                    });
+                },
+                error: function(xhr) {
+                    alert('Error fetching data: ' + (xhr.responseJSON ? xhr.responseJSON.error : 'Unknown error'));
+                }
+            });
+        });
+        
+        $('#creditRulesModal').on('show.bs.modal', function() {
+            loadCreditRules();
+        });
+
+        function showCustomAlert(message, type) {
+            const alertHtml = `
+                <div class="custom-alert-overlay">
+                    <div class="custom-alert custom-alert-${type}">
+                        <div class="custom-alert-icon">
+                            <i class="bi bi-${type === 'success' ? 'check-circle' : 'exclamation-circle'}"></i>
+                        </div>
+                        <div class="custom-alert-content">
+                            <p>${message}</p>
+                            <button class="btn btn-primary" onclick="closeCustomAlert()">OK</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            $('body').append(alertHtml);
+        }
+
+        window.closeCustomAlert = function() {
+            $('.custom-alert-overlay').remove();
+        };
+
+        function populateSubjectEditModal(subject, lab_rooms) {
+            const editModalHtml = `
+                <div class="modal fade" id="editSubjectModal" tabindex="-1" aria-labelledby="editSubjectModalLabel" aria-hidden="true">
+                    <div class="modal-dialog">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title" id="editSubjectModalLabel">Edit Subject: ${subject.name}</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                            </div>
+                            <div class="modal-body">
+                                <form id="edit-subject-form" action="/edit_row/subjects" method="post">
+                                    <input type="hidden" name="primary_key" value="subject_id">
+                                    <input type="hidden" name="primary_value" value="${subject.subject_id}">
+                                    
+                                    <div class="mb-3">
+                                        <label for="edit_subject_code" class="form-label">Subject Code</label>
+                                        <input type="text" class="form-control" id="edit_subject_code" name="subject_code" value="${subject.subject_code}">
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="edit_name" class="form-label">Subject Name</label>
+                                        <input type="text" class="form-control" id="edit_name" name="name" value="${subject.name}">
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="edit_credits" class="form-label">Credits</label>
+                                        <input type="number" class="form-control" id="edit_credits" name="credits" value="${subject.credits}" min="0">
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="edit_theory_sessions_per_week" class="form-label">Theory Sessions/Wk</label>
+                                        <input type="number" class="form-control" id="edit_theory_sessions_per_week" name="theory_sessions_per_week" value="${subject.theory_sessions_per_week || '0'}" min="0">
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="edit_lab_sessions_per_week" class="form-label">Lab Sessions/Wk</label>
+                                        <input type="number" class="form-control" id="edit_lab_sessions_per_week" name="lab_sessions_per_week" value="${subject.lab_sessions_per_week || '0'}" min="0">
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="edit_has_lab" class="form-label">Has Lab?</label>
+                                        <select class="form-select" id="edit_has_lab" name="has_lab">
+                                            <option value="0" ${subject.has_lab === 0 ? 'selected' : ''}>No</option>
+                                            <option value="1" ${subject.has_lab === 1 ? 'selected' : ''}>Yes</option>
+                                        </select>
+                                    </div>
+                                    <div class="mb-3" id="edit-lab-details-container" style="display: ${subject.has_lab === 1 ? 'block' : 'none'};">
+                                        <label for="edit_lab_duration_hours" class="form-label">Lab Duration (hours)</label>
+                                        <select class="form-select" id="edit_lab_duration_hours" name="lab_duration_hours">
+                                            <option value="1.0" ${subject.lab_duration_hours == 1.0 ? 'selected' : ''}>1.0 Hour</option>
+                                            <option value="2.0" ${subject.lab_duration_hours == 2.0 ? 'selected' : ''}>2.0 Hours (Default)</option>
+                                            <option value="3.0" ${subject.lab_duration_hours == 3.0 ? 'selected' : ''}>3.0 Hours</option>
+                                        </select>
+                                    </div>
+                                     <div class="mb-3" id="edit-lab-room-container" style="display: ${subject.has_lab === 1 ? 'block' : 'none'};">
+                                        <label for="edit_preferred_lab_room_id" class="form-label">Preferred Lab Room</label>
+                                        <select class="form-select" id="edit_preferred_lab_room_id" name="preferred_lab_room_id">
+                                        </select>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">Exam Type</label>
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="radio" name="exam_type" value="External" ${subject.exam_type === 'External' ? 'checked' : ''}>
+                                            <label class="form-check-label">Term End Exam</label>
+                                        </div>
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="radio" name="exam_type" value="Internal" ${subject.exam_type === 'Internal' ? 'checked' : ''}>
+                                            <label class="form-check-label">Internal Only</label>
+                                        </div>
+                                    </div>
+                                    <div class="modal-footer">
+                                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                                        <button type="submit" class="btn btn-primary">Save changes</button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                </div>`;
+
+            $('body').append(editModalHtml);
+            const editModalEl = document.getElementById('editSubjectModal');
+            const editModal = new bootstrap.Modal(editModalEl);
+
+            $('#edit_has_lab').on('change', function() {
+                if ($(this).val() === '1') {
+                    $('#edit-lab-details-container').show();
+                    $('#edit-lab-room-container').show();
+                } else {
+                    $('#edit-lab-details-container').hide();
+                    $('#edit-lab-room-container').hide();
+                }
+            }).trigger('change');
+
+            // Populate lab rooms dropdown
+            const select = $('#edit_preferred_lab_room_id');
+            select.empty();
+            select.append('<option value="">-- Select Room --</option>');
+            lab_rooms.forEach(room => {
+                const selected = room.room_id == subject.preferred_lab_room_id ? 'selected' : '';
+                select.append(`<option value="${room.room_id}" ${selected}>${room.room_number}</option>`);
+            });
+        
+            $('#edit-subject-form').on('submit', function(event) {
+                event.preventDefault();
+                $.ajax({
+                    url: $(this).attr('action'),
+                    type: 'POST',
+                    data: $(this).serialize(),
+                    success: function(response) {
+                        alert(response.message);
+                        editModal.hide();
+                        window.location.reload();
+                    },
+                    error: function(xhr) {
+                        alert('Error updating record: ' + (xhr.responseJSON ? xhr.responseJSON.error : 'Unknown error'));
+                    }
+                });
+            });
+            editModal.show();
+            editModalEl.addEventListener('hidden.bs.modal', function() {
+                editModalEl.remove();
+            });
+        }
+    });
+</script>
+<style>
+    /* Add a basic overlay and alert box styling for the custom pop-up */
+    .custom-alert-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0, 0, 0, 0.5);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 1050;
+    }
+    .custom-alert {
+        background: white;
+        padding: 2rem;
+        border-radius: 0.5rem;
+        text-align: center;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        max-width: 400px;
+        width: 90%;
+    }
+    .custom-alert-success { border-left: 5px solid #28a745; }
+    .custom-alert-error { border-left: 5px solid #dc3545; }
+    .custom-alert-icon {
+        font-size: 3rem;
+        margin-bottom: 1rem;
+    }
+    .custom-alert-success .custom-alert-icon { color: #28a745; }
+    .custom-alert-error .custom-alert-icon { color: #dc3545; }
+</style>
+{% endblock %}
