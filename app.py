@@ -2157,7 +2157,6 @@ def add_record(table_name):
         cursor.close()
         conn.close()
 
-@app.route('/edit_row/<table_name>', methods=['POST'])
 def edit_row(table_name):
     if not is_valid_table(table_name):
         flash('Invalid table name!', 'error')
@@ -2282,7 +2281,7 @@ def edit_row(table_name):
             return jsonify({'error': f"Data type conversion error: {e}. Please check your input format."}), 400
         else:
             flash(f"Data type conversion error: {e}. Please check your input format.", 'error')
-            return redirect(request.referrer or url_for('index'))
+            return redirect(request.referrer or url_for('index1'))
     finally:
         cursor.close()
         conn.close()
