@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify, redirect, url_for, flash, session, Response
+from flask import Flask, render_template, request, jsonify, redirect, url_for, flash, session, Response, send_file
 from werkzeug.security import generate_password_hash, check_password_hash
 import mysql.connector
 from mysql.connector import Error
@@ -10,6 +10,9 @@ import csv
 import io
 import os
 from decimal import Decimal
+import pandas as pd
+from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+from datetime import time # Make sure 'time' is imported from datetime
 
 
 # Placeholder for a separate DB configuration file (as in app1.py)
@@ -86,6 +89,11 @@ def login_required(role=None):
             return fn(*args, **kwargs)
         return decorated_view
     return wrapper
+
+@app.context_processor
+def inject_now():
+    """Injects the current datetime into all templates."""
+    return {'now': datetime.now()}
 
 @app.context_processor
 def inject_globals():
@@ -2913,6 +2921,145 @@ def api_sections():
     except Exception as e:
         logger.error(f"Error fetching sections: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
+    
+# *** PASTE THIS ENTIRE BLOCK INTO YOUR APP.PY ***
+
+@app.route('/cr/download/excel')
+@login_required('CR')
+def cr_download_timetable_excel():
+    cr_section_id = session.get('section_id')
+    if not cr_section_id:
+        flash("You must be assigned to a section to download reports.", "warning")
+        return redirect(url_for('cr_dashboard'))
+        
+    connection = None
+    try:
+        connection = get_db_connection() 
+        cursor = connection.cursor(dictionary=True)
+        cursor.execute("""
+            SELECT tt.day_of_week, ts.start_time, ts.end_time,
+                   s.name AS subject_name, u.name AS faculty_name, r.room_number,
+                   tt.is_lab_session
+            FROM timetable tt
+            JOIN batch_subjects bs ON tt.batch_subject_id = bs.batch_subject_id
+            JOIN subjects s ON bs.subject_id = s.subject_id
+            JOIN users u ON tt.faculty_id = u.user_id
+            JOIN timeslots ts ON tt.timeslot_id = ts.timeslot_id
+            LEFT JOIN rooms r ON tt.room_id = r.room_id
+            WHERE tt.section_id = %s AND tt.date IS NOT NULL
+        """, (cr_section_id,))
+        timetable_data = cursor.fetchall()
+
+        days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+        time_slots = ['09:00 - 10:00', '10:00 - 11:00', '11:00 - 12:00', '12:00 - 13:00', '13:00 - 14:00', '14:00 - 15:00', '15:00 - 16:00', '16:00 - 17:00']
+        
+        # We need to import pandas as pd and openpyxl stuff at the top of app.py
+        # Make sure these are at the top of your app.py file:
+        # import pandas as pd
+        # from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+        
+        df = pd.DataFrame(index=time_slots, columns=days).fillna('')
+        df.index.name = "TIME"
+        for entry in timetable_data:
+            start_time_str = (datetime.min + entry['start_time']).strftime('%H:%M') if isinstance(entry['start_time'], timedelta) else entry['start_time'].strftime('%H:%M')
+            end_time_str = (datetime.min + entry['end_time']).strftime('%H:%M') if isinstance(entry['end_time'], timedelta) else entry['end_time'].strftime('%H:%M')
+            slot = f"{start_time_str} - {end_time_str}"
+            day = entry['day_of_week']
+            lab_tag = " (LAB)" if entry['is_lab_session'] else ""
+            cell_content = f"{entry['subject_name']}{lab_tag}\n{entry['faculty_name']}\nRoom: {entry.get('room_number', 'N/A')}"
+            if slot in df.index and day in df.columns:
+                df.loc[slot, day] = cell_content
+        df.loc['13:00 - 14:00'] = "LUNCH BREAK"
+        
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, sheet_name='Timetable', startrow=2)
+            ws = writer.sheets['Timetable']
+            header_font = Font(bold=True, color="FFFFFF", size=14)
+            header_fill = PatternFill(start_color="A6262E", end_color="A6262E", fill_type="solid")
+            center_align = Alignment(horizontal='center', vertical='center', wrap_text=True)
+            border_side = Side(style='thin', color='DDDDDD')
+            cell_border = Border(left=border_side, right=border_side, top=border_side, bottom=border_side)
+            ws.merge_cells('A1:G1')
+            title_cell = ws['A1']
+            title_cell.value = f"Timetable for {session.get('class_name', '')}"
+            title_cell.font = header_font
+            title_cell.fill = header_fill
+            title_cell.alignment = center_align
+            for row in ws.iter_rows():
+                for cell in row:
+                    cell.border = cell_border
+                    cell.alignment = center_align
+        output.seek(0)
+        return send_file(output, as_attachment=True, download_name='timetable.xlsx', mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    except Exception as e:
+        flash(f"An error occurred while generating the Excel file: {e}", "danger")
+        logger.error(f"Error generating CR Excel: {e}", exc_info=True)
+        return redirect(url_for('cr_dashboard'))
+    finally:
+        if connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+
+
+@app.route('/cr/download/csv')
+@login_required('CR')
+def cr_download_timetable_csv():
+    cr_section_id = session.get('section_id')
+    if not cr_section_id:
+        flash("You must be assigned to a section to download reports.", "warning")
+        return redirect(url_for('cr_dashboard'))
+
+    connection = None
+    try:
+        connection = get_db_connection()
+        cursor = connection.cursor(dictionary=True)
+        cursor.execute("""
+            SELECT tt.day_of_week, ts.start_time, ts.end_time,
+                   s.name AS subject_name, u.name AS faculty_name, r.room_number,
+                   tt.is_lab_session
+            FROM timetable tt
+            JOIN batch_subjects bs ON tt.batch_subject_id = bs.batch_subject_id
+            JOIN subjects s ON bs.subject_id = s.subject_id
+            JOIN users u ON tt.faculty_id = u.user_id
+            JOIN timeslots ts ON tt.timeslot_id = ts.timeslot_id
+            LEFT JOIN rooms r ON tt.room_id = r.room_id
+            WHERE tt.section_id = %s AND tt.date IS NOT NULL
+        """, (cr_section_id,))
+        timetable_data = cursor.fetchall()
+
+        days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+        time_slots = ['09:00 - 10:00', '10:00 - 11:00', '11:00 - 12:00', '12:00 - 13:00', '13:00 - 14:00', '14:00 - 15:00', '15:00 - 16:00', '16:00 - 17:00']
+        
+        # Make sure 'import pandas as pd' is at the top of your app.py
+        df = pd.DataFrame(index=time_slots, columns=days).fillna('')
+        df.index.name = "TIME"
+
+        for entry in timetable_data:
+            start_time_str = (datetime.min + entry['start_time']).strftime('%H:%M') if isinstance(entry['start_time'], timedelta) else entry['start_time'].strftime('%H:%M')
+            end_time_str = (datetime.min + entry['end_time']).strftime('%H:%M') if isinstance(entry['end_time'], timedelta) else entry['end_time'].strftime('%H:%M')
+            slot = f"{start_time_str} - {end_time_str}"
+            day = entry['day_of_week']
+            lab_tag = " (LAB)" if entry['is_lab_session'] else ""
+            cell_content = f"{entry['subject_name']}{lab_tag} / {entry['faculty_name']} / Room: {entry.get('room_number', 'N/A')}"
+            if slot in df.index and day in df.columns:
+                df.loc[slot, day] = cell_content
+        df.loc['13:00 - 14:00'] = "LUNCH BREAK"
+        
+        output = io.StringIO()
+        df.to_csv(output)
+        output.seek(0)
+        
+        return send_file(io.BytesIO(output.getvalue().encode('utf-8')), as_attachment=True, download_name='timetable.csv', mimetype='text/csv')
+
+    except Exception as e:
+        flash(f"An error occurred while generating the CSV file: {e}", "danger")
+        logger.error(f"Error generating CR CSV: {e}", exc_info=True)
+        return redirect(url_for('cr_dashboard'))
+    finally:
+        if connection and connection.is_connected():
+            cursor.close()
+            connection.close()
         
 @app.errorhandler(404)
 def page_not_found(e):
