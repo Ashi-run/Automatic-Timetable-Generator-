@@ -10,20 +10,7 @@ import csv
 import io
 import os
 from decimal import Decimal
-from advanced_timetable_logic import (
-    generate_timetable_wrapper,
-    get_schools,
-    get_departments_by_school,
-    get_academic_years,
-    get_semesters_by_year,
-    get_sections_by_filters,
-    authenticate_coordinator,
-    get_user_school,
-    TimetableGenerator,
-    get_semester_dates_by_school,
-    get_subject_progress_for_department_and_semester,
-    generate_csv_output
-)
+
 
 # Placeholder for a separate DB configuration file (as in app1.py)
 class DBConfig:
@@ -470,7 +457,6 @@ def generate_csv_output(all_timetables_raw_data):
     return output.getvalue()
 
 
-
 # --- Consolidated Routes ---
 
 @app.route('/')
@@ -620,54 +606,6 @@ def get_faculty_assignments_by_filters():
         cursor.close()
         conn.close()
 
-@app.route('/fetch_room_timetable_data')
-def fetch_room_timetable_data():
-    """
-    Fetches timetable data for all rooms to populate the usage tables.
-    Returns a JSON object containing the timetable entries.
-    """
-    conn = get_db_connection()
-    if conn is None:
-        # If the database connection fails, return a 500 error
-        return jsonify({'error': 'Database connection failed!'}), 500
-    
-    cursor = conn.cursor(dictionary=True)
-    query = """
-        SELECT
-            t.day_of_week,
-            ts.start_time,
-            ts.end_time,
-            r.room_number,
-            s.name AS subject_name,
-            u.name AS faculty_name,
-            sec.name AS section_name
-        FROM timetable t
-        JOIN timeslots ts ON t.timeslot_id = ts.timeslot_id
-        LEFT JOIN rooms r ON t.room_id = r.room_id
-        JOIN batch_subjects bs ON t.batch_subject_id = bs.batch_subject_id
-        JOIN subjects s ON bs.subject_id = s.subject_id
-        JOIN users u ON t.faculty_id = u.user_id
-        JOIN sections sec ON t.section_id = sec.section_id
-        WHERE t.is_cancelled = 0 AND t.is_completed = 0
-        ORDER BY r.room_number, t.day_of_week, ts.start_time
-    """
-    try:
-        cursor.execute(query)
-        data = cursor.fetchall()
-        # The database returns time objects, which are not directly JSON serializable.
-        # This loop converts them to strings.
-        for row in data:
-            if row['start_time']:
-                row['start_time'] = str(row['start_time'])
-            if row['end_time']:
-                row['end_time'] = str(row['end_time'])
-        return jsonify(data)
-    except Error as e:
-        # If a database error occurs, return an error message as JSON
-        return jsonify({'error': str(e)}), 500
-    finally:
-        cursor.close()
-        conn.close()
 # Missing route for fetching batches by department.
 @app.route('/api/get_batches_by_department/<int:department_id>')
 @login_required('academic_coordinator')
@@ -687,6 +625,7 @@ def get_batches_by_department(department_id):
     cursor.close()
     conn.close()
     return jsonify(batches)
+
 @app.route('/api/get_batches_by_academic_year/<int:year_id>')
 @login_required('academic_coordinator')
 def get_batches_by_academic_year(year_id):
@@ -1020,7 +959,7 @@ def bulk_generate():
         logger.error(f"Error in bulk_generate route: {str(e)}", exc_info=True)
         flash(f"An unexpected error occurred during bulk generation: {str(e)}", "error")
         return redirect(url_for('academic_coordinator_dashboard'))
-        
+    
 @app.route('/api/get_rooms_by_type/<string:room_type>')
 def get_rooms_by_type(room_type):
     conn = get_db_connection()
@@ -1037,7 +976,56 @@ def get_rooms_by_type(room_type):
     finally:
         cursor.close()
         conn.close()
-        
+
+@app.route('/fetch_room_timetable_data')
+def fetch_room_timetable_data():
+    """
+    Fetches timetable data for all rooms to populate the usage tables.
+    Returns a JSON object containing the timetable entries.
+    """
+    conn = get_db_connection()
+    if conn is None:
+        # If the database connection fails, return a 500 error
+        return jsonify({'error': 'Database connection failed!'}), 500
+    
+    cursor = conn.cursor(dictionary=True)
+    query = """
+        SELECT
+            t.day_of_week,
+            ts.start_time,
+            ts.end_time,
+            r.room_number,
+            s.name AS subject_name,
+            u.name AS faculty_name,
+            sec.name AS section_name
+        FROM timetable t
+        JOIN timeslots ts ON t.timeslot_id = ts.timeslot_id
+        LEFT JOIN rooms r ON t.room_id = r.room_id
+        JOIN batch_subjects bs ON t.batch_subject_id = bs.batch_subject_id
+        JOIN subjects s ON bs.subject_id = s.subject_id
+        JOIN users u ON t.faculty_id = u.user_id
+        JOIN sections sec ON t.section_id = sec.section_id
+        WHERE t.is_cancelled = 0 AND t.is_completed = 0
+        ORDER BY r.room_number, t.day_of_week, ts.start_time
+    """
+    try:
+        cursor.execute(query)
+        data = cursor.fetchall()
+        # The database returns time objects, which are not directly JSON serializable.
+        # This loop converts them to strings.
+        for row in data:
+            if row['start_time']:
+                row['start_time'] = str(row['start_time'])
+            if row['end_time']:
+                row['end_time'] = str(row['end_time'])
+        return jsonify(data)
+    except Error as e:
+        # If a database error occurs, return an error message as JSON
+        return jsonify({'error': str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
 @app.route("/export_timetables_csv")
 @login_required('academic_coordinator')
 def export_timetables_csv():
@@ -2442,6 +2430,7 @@ def add_record(table_name):
         cursor.close()
         conn.close()
 
+@app.route('/edit_row/<table_name>', methods=['POST'])
 def edit_row(table_name):
     if not is_valid_table(table_name):
         flash('Invalid table name!', 'error')
