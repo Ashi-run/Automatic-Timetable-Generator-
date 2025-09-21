@@ -10,7 +10,20 @@ import csv
 import io
 import os
 from decimal import Decimal
-
+from advanced_timetable_logic import (
+    generate_timetable_wrapper,
+    get_schools,
+    get_departments_by_school,
+    get_academic_years,
+    get_semesters_by_year,
+    get_sections_by_filters,
+    authenticate_coordinator,
+    get_user_school,
+    TimetableGenerator,
+    get_semester_dates_by_school,
+    get_subject_progress_for_department_and_semester,
+    generate_csv_output
+)
 # Placeholder for a separate DB configuration file (as in app1.py)
 class DBConfig:
     DB_HOST = '127.0.0.1'
@@ -114,350 +127,7 @@ def is_valid_table(table_name):
         cursor.close()
         conn.close()
 
-class TimetableGenerator:
-    def _execute_query(self, query, params=None, fetch_one=False):
-        conn = get_db_connection()
-        if not conn:
-            return None
-        cursor = conn.cursor(dictionary=True)
-        try:
-            cursor.execute(query, params)
-            if fetch_one:
-                return cursor.fetchone()
-            return cursor.fetchall()
-        finally:
-            cursor.close()
-            conn.close()
-
-    def load_specific_timetable(self, log_id):
-        conn = get_db_connection()
-        if not conn: return {"error": "DB connection failed."}
-        cursor = conn.cursor(dictionary=True)
-        try:
-            log_query = "SELECT * FROM timetable_generation_log WHERE log_id = %s"
-            log_entry = self._execute_query(log_query, (log_id,), fetch_one=True)
-            if not log_entry: return {"error": "Log entry not found."}
-
-            timetable_query = """
-                SELECT t.*, s.name AS subject_name, u.name AS faculty_name, r.room_number, ts.start_time, ts.end_time
-                FROM timetable t
-                JOIN batch_subjects bs ON t.batch_subject_id = bs.batch_subject_id
-                JOIN subjects s ON bs.subject_id = s.subject_id
-                JOIN users u ON t.faculty_id = u.user_id
-                LEFT JOIN rooms r ON t.room_id = r.room_id
-                JOIN timeslots ts ON t.timeslot_id = ts.timeslot_id
-                WHERE t.log_id = %s
-                ORDER BY t.date, ts.start_time
-            """
-            raw_timetable = self._execute_query(timetable_query, (log_id,))
-            
-            section_query = "SELECT name, batch_id FROM sections WHERE section_id = %s"
-            section_info = self._execute_query(section_query, (log_entry['section_id'],), fetch_one=True)
-
-            timetable = {}
-            for entry in raw_timetable:
-                day = entry['day_of_week']
-                start_time_str = entry['start_time'].strftime('%H:%M')
-                if day not in timetable:
-                    timetable[day] = {}
-                timetable[day][start_time_str] = {
-                    'subject': entry['subject_name'],
-                    'faculty': entry['faculty_name'],
-                    'room': entry['room_number']
-                }
-
-            timeslot_labels = self._execute_query("SELECT day_of_week, start_time, end_time FROM timeslots ORDER BY day_of_week, start_time")
-            timeslot_labels = sorted(list(set([(ts['day_of_week'], ts['start_time'].strftime('%H:%M')) for ts in timeslot_labels])))
-            
-            grid = self.build_grid(raw_timetable)
-            
-            return {
-                'section_id': log_entry['section_id'],
-                'section_name': section_info['name'],
-                'timetable': timetable,
-                'generation_log': log_entry,
-                'raw_timetable': raw_timetable,
-                'grid': grid,
-                'timeslot_labels': timeslot_labels,
-                'start_date': log_entry['generation_date'],
-                'end_date': log_entry['generation_date'] + timedelta(weeks=1)
-            }
-        except Exception as e:
-            return {"error": f"Error loading timetable: {str(e)}"}
-        finally:
-            cursor.close()
-            conn.close()
-    
-    def load_specific_timetable_raw(self, log_id):
-        conn = get_db_connection()
-        if not conn: return None
-        cursor = conn.cursor(dictionary=True)
-        try:
-            timetable_query = """
-                SELECT t.*, s.name AS subject_name, u.name AS faculty_name, r.room_number, ts.start_time, ts.end_time
-                FROM timetable t
-                JOIN batch_subjects bs ON t.batch_subject_id = bs.batch_subject_id
-                JOIN subjects s ON bs.subject_id = s.subject_id
-                JOIN users u ON t.faculty_id = u.user_id
-                LEFT JOIN rooms r ON t.room_id = r.room_id
-                JOIN timeslots ts ON t.timeslot_id = ts.timeslot_id
-                WHERE t.log_id = %s
-                ORDER BY t.date, ts.start_time
-            """
-            cursor.execute(timetable_query, (log_id,))
-            raw_timetable = cursor.fetchall()
-            return raw_timetable
-        except Exception as e:
-            logger.error(f"Error loading raw timetable data: {e}", exc_info=True)
-            return None
-        finally:
-            cursor.close()
-            conn.close()
-
-    def build_grid(self, raw_timetable):
-        days_of_week = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
-        all_timeslots = self._execute_query("SELECT start_time FROM timeslots WHERE is_active = 1 ORDER BY start_time")
-        timeslot_headers = sorted([str(t['start_time']) for t in all_timeslots])
-        
-        grid = {day: {ts: None for ts in timeslot_headers} for day in days_of_week}
-        
-        for entry in raw_timetable:
-            day = entry['day_of_week']
-            start_time = str(entry['start_time'])
-            
-            if day in grid and start_time in grid[day]:
-                grid[day][start_time] = entry
-        return grid
-    
-    def get_all_generation_logs(self, status_filter=None):
-        conn = get_db_connection()
-        if not conn:
-            return []
-        cursor = conn.cursor(dictionary=True)
-        try:
-            query = "SELECT log_id, section_id, generation_date, status, total_slots_assigned, total_slots_required FROM timetable_generation_log"
-            params = []
-            if status_filter:
-                query += " WHERE status = %s"
-                params.append(status_filter)
-            query += " ORDER BY generation_date DESC"
-            cursor.execute(query, params)
-            return cursor.fetchall()
-        except Error as e:
-            logger.error(f"Error fetching generation logs: {e}")
-            return []
-        finally:
-            cursor.close()
-            conn.close()
-    
-    def get_subject_progress_for_department_and_semester(self, department_id, semester_number, academic_year, start_date, end_date):
-        # This is a complex function. For this exercise, I'll provide a simplified version.
-        query = """
-            SELECT s.name AS subject_name, sp.planned_sessions, sp.completed_sessions
-            FROM subject_progress sp
-            JOIN batch_subjects bs ON sp.batch_subject_id = bs.batch_subject_id
-            JOIN subjects s ON bs.subject_id = s.subject_id
-            JOIN sections sec ON sp.section_id = sec.section_id
-            JOIN batches b ON sec.batch_id = b.batch_id
-            JOIN academic_years ay ON b.academic_year_id = ay.year_id
-            JOIN batch_departments bd ON b.batch_id = bd.batch_id
-            WHERE bd.department_id = %s AND b.semester = %s AND ay.year_name = %s
-        """
-        params = (department_id, semester_number, academic_year)
-        return self._execute_query(query, params)
-
-def generate_timetable_wrapper(section_id, start_date, semester_weeks):
-    # This is a mock-up of the generation process
-    generator = TimetableGenerator()
-    generation_date = datetime.now()
-    log_id = int(generation_date.timestamp()) # Mock log_id
-    
-    # Mock data to simulate successful generation
-    mock_log = {
-        'log_id': log_id,
-        'section_id': section_id,
-        'generation_date': generation_date,
-        'status': 'Success',
-        'constraints_violated': [],
-        'total_slots_assigned': 20, # Mock values
-        'total_slots_required': 20, # Mock values
-        'generation_time_seconds': 5.0
-    }
-    
-    # Mock timetable data
-    mock_timetable = [
-        {'day_of_week': 'Monday', 'start_time': datetime.strptime('09:00', '%H:%M').time(), 'subject_name': 'Calculus', 'faculty_name': 'Dr. V. Vidyasagar', 'room_number': 'LH-101'},
-        {'day_of_week': 'Tuesday', 'start_time': datetime.strptime('10:00', '%H:%M').time(), 'subject_name': 'Physics', 'faculty_name': 'Dr. Rahul Koshti', 'room_number': 'Lab 6'},
-    ]
-
-    if section_id == 10:
-         mock_log['status'] = 'Partial'
-         mock_log['constraints_violated'] = ["Failed to assign session for Calculus"]
-         mock_log['total_slots_assigned'] = 15
-    
-    result = {
-        'generation_log': mock_log,
-        'section_id': section_id,
-        'section_name': f"Section {section_id}",
-        'timetable': {}, # Simplified as the template uses 'grid'
-        'raw_timetable': mock_timetable,
-        'grid': generator.build_grid(mock_timetable),
-        'timeslot_labels': sorted(list(set([str(t['start_time']) for t in mock_timetable]))),
-        'start_date': start_date,
-        'end_date': start_date + timedelta(weeks=semester_weeks)
-    }
-
-    if mock_log['status'] != 'Success':
-        result['error'] = f"Timetable generation was {mock_log['status'].lower()}."
-
-    return result
-
-def get_schools():
-    conn = get_db_connection()
-    if conn:
-        cursor = conn.cursor(dictionary=True)
-        cursor.execute("SELECT school_id, name, abbrevation FROM schools ORDER BY name")
-        schools = cursor.fetchall()
-        cursor.close()
-        conn.close()
-        return schools
-    return []
-
-def get_departments_by_school(school_id):
-    conn = get_db_connection()
-    if conn:
-        cursor = conn.cursor(dictionary=True)
-        cursor.execute("SELECT department_id, name FROM departments WHERE school_id = %s ORDER BY name", (school_id,))
-        departments = cursor.fetchall()
-        cursor.close()
-        conn.close()
-        return departments
-    return []
-
-def get_academic_years():
-    conn = get_db_connection()
-    if conn:
-        cursor = conn.cursor(dictionary=True)
-        cursor.execute("SELECT year_id, year_name, is_current FROM academic_years ORDER BY start_year DESC")
-        years = cursor.fetchall()
-        cursor.close()
-        conn.close()
-        return years
-    return []
-
-def get_semesters_by_year(year_id):
-    conn = get_db_connection()
-    if conn:
-        cursor = conn.cursor(dictionary=True)
-        cursor.execute("""
-            SELECT b.semester
-            FROM batches b
-            WHERE b.academic_year_id = %s
-            GROUP BY b.semester
-            ORDER BY b.semester
-        """, (year_id,))
-        semesters = cursor.fetchall()
-        cursor.close()
-        conn.close()
-        return [s['semester'] for s in semesters]
-    return []
-
-def get_sections_by_filters(school_id, dept_id, year_id, semester):
-    conn = get_db_connection()
-    if not conn: return []
-    cursor = conn.cursor(dictionary=True)
-    
-    query = """
-        SELECT
-            sec.section_id,
-            sec.name AS section_name,
-            d.name AS department_name,
-            ay.year_name AS academic_year,
-            ay.year_id AS academic_year_id,
-            b.semester,
-            b.year AS academic_year_int
-        FROM sections sec
-        JOIN batches b ON sec.batch_id = b.batch_id
-        JOIN academic_years ay ON b.academic_year_id = ay.year_id
-        JOIN batch_departments bd ON b.batch_id = bd.batch_id
-        JOIN departments d ON bd.department_id = d.department_id
-        WHERE d.school_id = %s
-    """
-    params = [school_id]
-    
-    if dept_id:
-        query += " AND d.department_id = %s"
-        params.append(dept_id)
-    if year_id:
-        query += " AND ay.year_id = %s"
-        params.append(year_id)
-    if semester:
-        query += " AND b.semester = %s"
-        params.append(semester)
-
-    query += " ORDER BY d.name, ay.year_name, b.semester, sec.name"
-    
-    try:
-        cursor.execute(query, tuple(params))
-        sections = cursor.fetchall()
-    except Error as e:
-        logger.error(f"Error fetching sections: {e}")
-        sections = []
-    finally:
-        cursor.close()
-        conn.close()
-    
-    return sections
-
-def get_semester_dates_by_school(school_id):
-    conn = get_db_connection()
-    if conn:
-        cursor = conn.cursor(dictionary=True)
-        cursor.execute("SELECT semester_number, academic_year, start_date, end_date FROM semester_config WHERE is_active = 1 LIMIT 1")
-        semester_info = cursor.fetchone()
-        cursor.close()
-        conn.close()
-        return semester_info
-    return None
-
-def generate_csv_output(all_timetables_raw_data):
-    output = io.StringIO()
-    writer = csv.writer(output)
-    
-    header = ['Section', 'Department', 'Academic Year', 'Semester', 'Date', 'Day', 'Start Time', 'End Time', 'Subject', 'Faculty', 'Room', 'Status']
-    writer.writerow(header)
-    
-    for timetable in all_timetables_raw_data:
-        section_name = timetable['section_name']
-        department = timetable['department']
-        academic_year_int = timetable['academic_year_int']
-        semester_int = timetable['semester_int']
-        
-        for entry in timetable['raw_timetable']:
-            is_cancelled = entry.get('is_cancelled', 0) == 1
-            status = 'Cancelled' if is_cancelled else 'Scheduled'
-            
-            row = [
-                section_name,
-                department,
-                academic_year_int,
-                semester_int,
-                str(entry.get('date', '')),
-                entry.get('day_of_week', ''),
-                str(entry.get('start_time', '')),
-                str(entry.get('end_time', '')),
-                entry.get('subject_name', ''),
-                entry.get('faculty_name', ''),
-                entry.get('room_number', ''),
-                status
-            ]
-            writer.writerow(row)
-    
-    return output.getvalue()
-
-
 # --- Consolidated Routes ---
-
 @app.route('/')
 def index1():
     if 'user_id' in session:
@@ -761,7 +431,7 @@ def get_batch_subject_mappings_by_filters():
 # --- Timetable Generation Dashboard Routes ---
 @app.route("/timetable_viewer")
 @login_required('academic_coordinator')
-def enhanced_dashboard():
+def timetable_viewer():
     try:
         coordinator_school_id = int(request.args.get('school_id', session.get('school_id', 1)))
         
@@ -825,13 +495,21 @@ def view_generated_timetable(log_id):
         assigned_slots = log_entry.get('total_slots_assigned', 0)
         success_rate = (assigned_slots / total_slots * 100) if total_slots > 0 else 0
         
+        # The key change is to ensure the constraints_violated is a list of strings
+        constraints_violated = log_entry.get('constraints_violated', [])
+        if isinstance(constraints_violated, str):
+            try:
+                constraints_violated = json.loads(constraints_violated)
+            except json.JSONDecodeError:
+                constraints_violated = [constraints_violated]
+        
         display_data = {
             'status': log_entry['status'] if log_entry else 'Unknown',
             'section_id': timetable_data['section_id'],
             'section_name': timetable_data['section_name'],
             'timetable': timetable_data['timetable'],
             'generation_log': {
-                'constraints_violated': json.loads(log_entry.get('constraints_violated', '[]')),
+                'constraints_violated': constraints_violated,
                 'total_slots_assigned': assigned_slots,
                 'total_slots_required': total_slots,
                 'generation_status': log_entry.get('status', 'Unknown')
@@ -855,23 +533,160 @@ def view_generated_timetable(log_id):
     except Exception as e:
         logger.error(f"Error viewing specific timetable log {log_id}: {str(e)}", exc_info=True)
         flash(f"Error loading timetable: {str(e)}", "error")
+        # Ensure redirection goes to a valid endpoint
         return redirect(url_for('generation_logs'))
+
+@app.route("/generate_timetable", methods=['GET', 'POST'])
+@login_required('academic_coordinator')
+def generate_timetable():
+    try:
+        section_id = request.form.get("section_id") if request.method == 'POST' else request.args.get("section_id")
+        logger.info(f"Request to GENERATE timetable for section_id: {section_id}")
+        
+        if not section_id:
+            flash("Please select a section to generate timetable.", "error")
+            return redirect(url_for('academic_coordinator_dashboard'))
+        
+        section_id = section_id.strip()
+        if not section_id.isdigit():
+            logger.error(f"Invalid section_id format: {section_id}")
+            flash(f"Invalid section ID: {section_id}", "error")
+            return redirect(url_for('academic_coordinator_dashboard'))
+        
+        section_id = int(section_id)
+        
+        if 'school_id' not in session:
+            session['school_id'] = 1
+            logger.info(f"Set default school_id=1 in session for section {section_id}")
+        
+        semester_info = get_semester_dates_by_school(session['school_id'])
+        if not semester_info:
+            flash("Semester configuration not found for your school. Cannot generate timetable.", "error")
+            return redirect(url_for('academic_coordinator_dashboard'))
+
+        semester_start_date = semester_info['start_date']
+        result = generate_timetable_wrapper(section_id, start_date=semester_start_date, semester_weeks=1)
+        
+        if "error" in result:
+            error_type = "warning" if "partial" in result['error'].lower() else "error"
+            flash(f"Generation process encountered issues: {result['error']}", error_type)
+            if not result.get('raw_timetable') or not result.get('log_id'): 
+                return redirect(url_for('academic_coordinator_dashboard'))
+        else:
+            flash("Timetable generation completed successfully!", "info")
+        
+        if result['generation_log']['constraints_violated']:
+            flash(f"Timetable generated with {len(result['generation_log']['constraints_violated'])} constraint issues. Details are available in the 'Constraint Issues' section below.", "warning")
+
+        total_slots = result['generation_log'].get('total_slots_required', 0)
+        assigned_slots = result['generation_log'].get('total_slots_assigned', 0)
+        success_rate = (assigned_slots / total_slots * 100) if total_slots > 0 else 0
+        
+        return render_template("timetable_display.html",
+                               timetable_data=result,
+                               generation_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                               section_id=section_id,
+                               success_rate=success_rate,
+                               display_constraints=True,
+                               is_generation_result=True)
+    
+    except ValueError as e:
+        logger.error(f"Invalid section ID: {str(e)}", exc_info=True)
+        flash(f"Invalid section ID: {str(e)}", "error")
+    except mysql.connector.Error as e:
+        logger.error(f"Database error during timetable generation: {str(e)}", exc_info=True)
+        flash(f"Database error: {str(e)}", "error")
+    except Exception as e:
+        logger.error(f"Unexpected error during timetable generation: {str(e)}", exc_info=True)
+        flash(f"System error during timetable generation: {str(e)}", "error")
+    
+    return redirect(url_for('academic_coordinator_dashboard'))
+
+
+@app.route("/view_timetable/<int:section_id>")
+@login_required('academic_coordinator')
+def view_timetable(section_id):
+    try:
+        logger.info(f"Request to VIEW latest timetable for section_id: {section_id}")
+        
+        generator = TimetableGenerator()
+        latest_log_query = """
+            SELECT log_id FROM timetable_generation_log
+            WHERE section_id = %s AND status = 'Success'
+            ORDER BY generation_date DESC
+            LIMIT 1
+        """
+        latest_log_entry = generator._execute_query(latest_log_query, (section_id,), fetch_one=True)
+
+        if not latest_log_entry:
+            flash(f"No successful timetable generation found for section {section_id}. Please generate one first.", "error")
+            return redirect(url_for('academic_coordinator_dashboard'))
+        
+        latest_log_id = latest_log_entry['log_id']
+        
+        timetable_data = generator.load_specific_timetable(latest_log_id)
+        
+        if not timetable_data or (isinstance(timetable_data, dict) and "error" in timetable_data):
+            error_message = timetable_data.get('error', f"Failed to load timetable for log ID: {latest_log_id}.") if isinstance(timetable_data, dict) else f"Failed to load timetable for log ID: {latest_log_id}."
+            flash(error_message, "error")
+            return redirect(url_for('academic_coordinator_dashboard'))
+
+        log_entry = timetable_data['generation_log']
+        total_slots = log_entry.get('total_slots_required', 0)
+        assigned_slots = log_entry.get('total_slots_assigned', 0)
+        success_rate = (assigned_slots / total_slots * 100) if total_slots > 0 else 0
+        
+        display_data = {
+            'status': log_entry['status'] if log_entry else 'Unknown',
+            'section_id': timetable_data['section_id'],
+            'section_name': timetable_data['section_name'],
+            'timetable': timetable_data['timetable'],
+            'generation_log': {
+                'constraints_violated': log_entry.get('constraints_violated', []),
+                'total_slots_assigned': assigned_slots,
+                'total_slots_required': total_slots,
+                'generation_status': log_entry.get('status', 'Unknown')
+            },
+            'raw_timetable': timetable_data.get('raw_timetable', []),
+            'grid': timetable_data['grid'],
+            'timeslot_labels': timetable_data['timeslot_labels'],
+            'generation_seconds': log_entry.get('generation_time_seconds', 0),
+            'generated_at': log_entry['generation_date'].strftime("%Y-%m-%d %H:%M:%S") if log_entry.get('generation_date') else "N/A",
+            'start_date': timetable_data.get('start_date'),
+            'end_date': timetable_data.get('end_date')
+        }
+
+        flash("Timetable loaded successfully for viewing.", "info")
+        if log_entry.get('constraints_violated'):
+            flash(f"This timetable was generated with {len(log_entry['constraints_violated'])} constraint issues. Details are available in the 'Constraint Issues' section below.", "warning")
+
+        return render_template("timetable_display.html",
+                               timetable_data=display_data,
+                               section_id=timetable_data['section_id'],
+                               success_rate=success_rate,
+                               display_constraints=True,
+                               is_generation_result=False,
+                               view_mode=True)
+    
+    except Exception as e:
+        logger.error(f"Error viewing timetable: {str(e)}", exc_info=True)
+        flash(f"Error loading timetable for viewing: {str(e)}", "error")
+        return redirect(url_for('academic_coordinator_dashboard'))
+
 
 @app.route("/bulk_generate", methods=['GET'])
 @login_required('academic_coordinator')
 def bulk_generate():
-    """
-    Route to handle bulk timetable generation for all sections
-    within the selected department, year, and semester.
-    """
     try:
         school_id = request.args.get('school_id', type=int)
         department_id = request.args.get('department_id', type=int)
         year_id = request.args.get('year_id')
         semester = request.args.get('semester')
 
-        if year_id: year_id = int(year_id)
-        if semester: semester = int(semester)
+        if year_id:
+            year_id = int(year_id)
+        if semester:
+            semester = int(semester)
 
         if not all([school_id, department_id]):
             flash("Please select at least School and Department for bulk generation.", "error")
@@ -896,6 +711,8 @@ def bulk_generate():
         semester_start_date = semester_info['start_date']
         
         results = []
+        generator = TimetableGenerator()
+
         for section in sections_to_generate:
             section_id = section['section_id']
             section_name = section['section_name']
@@ -903,7 +720,7 @@ def bulk_generate():
             academic_year_val = section.get('academic_year')
             semester_val = section.get('semester')
 
-            logger.info(f"Starting bulk generation for section: {section_name} (ID: {section_id})")
+            logger.info(f"Starting bulk generation for section: {section_name} (ID: {section_id}) in Dept: {department_name}, Year: {academic_year_val}, Sem: {semester_val}")
             
             try:
                 generation_result = generate_timetable_wrapper(section_id, start_date=semester_start_date, semester_weeks=1)
@@ -958,72 +775,6 @@ def bulk_generate():
         logger.error(f"Error in bulk_generate route: {str(e)}", exc_info=True)
         flash(f"An unexpected error occurred during bulk generation: {str(e)}", "error")
         return redirect(url_for('academic_coordinator_dashboard'))
-    
-@app.route('/api/get_rooms_by_type/<string:room_type>')
-def get_rooms_by_type(room_type):
-    conn = get_db_connection()
-    if conn is None:
-        return jsonify({'error': 'Database connection failed!'}), 500
-    cursor = conn.cursor(dictionary=True)
-    query = "SELECT room_id, room_number FROM rooms WHERE room_type = %s ORDER BY room_number"
-    try:
-        cursor.execute(query, (room_type,))
-        rooms = cursor.fetchall()
-        return jsonify(rooms)
-    except Error as e:
-        return jsonify({'error': str(e)}), 500
-    finally:
-        cursor.close()
-        conn.close()
-
-@app.route('/fetch_room_timetable_data')
-def fetch_room_timetable_data():
-    """
-    Fetches timetable data for all rooms to populate the usage tables.
-    Returns a JSON object containing the timetable entries.
-    """
-    conn = get_db_connection()
-    if conn is None:
-        # If the database connection fails, return a 500 error
-        return jsonify({'error': 'Database connection failed!'}), 500
-    
-    cursor = conn.cursor(dictionary=True)
-    query = """
-        SELECT
-            t.day_of_week,
-            ts.start_time,
-            ts.end_time,
-            r.room_number,
-            s.name AS subject_name,
-            u.name AS faculty_name,
-            sec.name AS section_name
-        FROM timetable t
-        JOIN timeslots ts ON t.timeslot_id = ts.timeslot_id
-        LEFT JOIN rooms r ON t.room_id = r.room_id
-        JOIN batch_subjects bs ON t.batch_subject_id = bs.batch_subject_id
-        JOIN subjects s ON bs.subject_id = s.subject_id
-        JOIN users u ON t.faculty_id = u.user_id
-        JOIN sections sec ON t.section_id = sec.section_id
-        WHERE t.is_cancelled = 0 AND t.is_completed = 0
-        ORDER BY r.room_number, t.day_of_week, ts.start_time
-    """
-    try:
-        cursor.execute(query)
-        data = cursor.fetchall()
-        # The database returns time objects, which are not directly JSON serializable.
-        # This loop converts them to strings.
-        for row in data:
-            if row['start_time']:
-                row['start_time'] = str(row['start_time'])
-            if row['end_time']:
-                row['end_time'] = str(row['end_time'])
-        return jsonify(data)
-    except Error as e:
-        # If a database error occurs, return an error message as JSON
-        return jsonify({'error': str(e)}), 500
-    finally:
-        cursor.close()
-        conn.close()
 
 @app.route("/export_timetables_csv")
 @login_required('academic_coordinator')
@@ -1037,8 +788,10 @@ def export_timetables_csv():
         year_id = request.args.get('year_id')
         semester = request.args.get('semester')
 
-        if year_id: year_id = int(year_id)
-        if semester: semester = int(semester)
+        if year_id:
+            year_id = int(year_id)
+        if semester:
+            semester = int(semester)
 
         if not all([school_id, department_id]):
             flash("Please select at least School and Department to export timetables.", "error")
@@ -1109,6 +862,72 @@ def export_timetables_csv():
         logger.error(f"Error during CSV export: {str(e)}", exc_info=True)
         flash(f"An unexpected error occurred during CSV export: {str(e)}", "error")
         return redirect(url_for('academic_coordinator_dashboard'))
+    
+@app.route('/api/get_rooms_by_type/<string:room_type>')
+def get_rooms_by_type(room_type):
+    conn = get_db_connection()
+    if conn is None:
+        return jsonify({'error': 'Database connection failed!'}), 500
+    cursor = conn.cursor(dictionary=True)
+    query = "SELECT room_id, room_number FROM rooms WHERE room_type = %s ORDER BY room_number"
+    try:
+        cursor.execute(query, (room_type,))
+        rooms = cursor.fetchall()
+        return jsonify(rooms)
+    except Error as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.route('/fetch_room_timetable_data')
+def fetch_room_timetable_data():
+    """
+    Fetches timetable data for all rooms to populate the usage tables.
+    Returns a JSON object containing the timetable entries.
+    """
+    conn = get_db_connection()
+    if conn is None:
+        # If the database connection fails, return a 500 error
+        return jsonify({'error': 'Database connection failed!'}), 500
+    
+    cursor = conn.cursor(dictionary=True)
+    query = """
+        SELECT
+            t.day_of_week,
+            ts.start_time,
+            ts.end_time,
+            r.room_number,
+            s.name AS subject_name,
+            u.name AS faculty_name,
+            sec.name AS section_name
+        FROM timetable t
+        JOIN timeslots ts ON t.timeslot_id = ts.timeslot_id
+        LEFT JOIN rooms r ON t.room_id = r.room_id
+        JOIN batch_subjects bs ON t.batch_subject_id = bs.batch_subject_id
+        JOIN subjects s ON bs.subject_id = s.subject_id
+        JOIN users u ON t.faculty_id = u.user_id
+        JOIN sections sec ON t.section_id = sec.section_id
+        WHERE t.is_cancelled = 0 AND t.is_completed = 0
+        ORDER BY r.room_number, t.day_of_week, ts.start_time
+    """
+    try:
+        cursor.execute(query)
+        data = cursor.fetchall()
+        # The database returns time objects, which are not directly JSON serializable.
+        # This loop converts them to strings.
+        for row in data:
+            if row['start_time']:
+                row['start_time'] = str(row['start_time'])
+            if row['end_time']:
+                row['end_time'] = str(row['end_time'])
+        return jsonify(data)
+    except Error as e:
+        # If a database error occurs, return an error message as JSON
+        return jsonify({'error': str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
 
 
 # --- CR Dashboard Routes ---
@@ -1134,7 +953,7 @@ def cr_dashboard():
 
         cursor = connection.cursor(dictionary=True)
 
-        # --- Fetch data for dropdowns (always needed for search) ---
+        # --- Fetch data for dropdowns ---
         cursor.execute("SELECT department_id, name FROM departments ORDER BY name;")
         departments = cursor.fetchall()
         cursor.execute("SELECT DISTINCT year FROM batches ORDER BY year;")
@@ -1142,7 +961,7 @@ def cr_dashboard():
         cursor.execute("SELECT DISTINCT semester FROM batches ORDER BY semester;")
         semesters = cursor.fetchall()
 
-        # --- Initialize variables (as empty by default) ---
+         # --- Initialize variables (as empty by default) ---
         my_weekly_timetable, subject_progress, notifications, cancellation_notifications = [], [], [], []
         selected_timetable, upcoming_classes, free_periods_today, my_semester = None, [], [], None
         selected_values = {}
@@ -1150,14 +969,12 @@ def cr_dashboard():
         view_mode = 'my_dashboard' 
 
         if request.method == 'POST':
-            # --- This is the search logic ---
             view_mode = 'search_result' 
             dept_id = request.form.get('department')
             year = request.form.get('year')
             semester = request.form.get('semester')
             selected_values = {'dept_id': dept_id, 'year': year, 'semester': semester}
-
-            # This query searches ALL logs, which is fine for a general search
+         # This query searches ALL logs, which is fine for a general search
             cursor.execute("""
                 SELECT DISTINCT
                     sec.name AS section_name,
@@ -1193,7 +1010,7 @@ def cr_dashboard():
                 
                 row['start_time'] = start_time_val.strftime('%H:%M')
                 row['end_time'] = end_time_val.strftime('%H:%M')
-                
+
                 section = row['section_name']
                 if section not in selected_timetable: selected_timetable[section] = []
                 selected_timetable[section].append(row)
@@ -1213,9 +1030,9 @@ def cr_dashboard():
             if latest_log:
                 latest_log_id = latest_log['log_id']
 
-        # This block will now only run if a CR is assigned AND a timetable log exists
+  # This block will now only run if a CR is assigned AND a timetable log exists
         if cr_section_id and latest_log_id and view_mode == 'my_dashboard':
-            
+            # This is the GET request block for the default view
             cursor.execute("""
                 SELECT b.semester
                 FROM sections s
@@ -1224,7 +1041,6 @@ def cr_dashboard():
             """, (cr_section_id,))
             cr_info = cursor.fetchone()
             my_semester = cr_info['semester'] if cr_info else None
-
             # Query for WEEKLY TIMETABLE using latest_log_id
             cursor.execute("""
                 SELECT DISTINCT
@@ -1244,7 +1060,7 @@ def cr_dashboard():
                 LEFT JOIN rooms r ON tt.room_id = r.room_id
                 WHERE tt.section_id = %s AND tt.log_id = %s AND (tt.subsection_id = %s OR tt.subsection_id IS NULL)
                 ORDER BY FIELD(tt.day_of_week, 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'), ts.start_time;
-            """, (cr_section_id, latest_log_id, cr_subsection_id))
+             """, (cr_section_id, latest_log_id, cr_subsection_id))
 
             my_weekly_timetable = cursor.fetchall()
             for entry in my_weekly_timetable:
@@ -1257,8 +1073,6 @@ def cr_dashboard():
                 entry['start_time'] = start_time_val.strftime('%H:%M')
                 entry['end_time'] = end_time_val.strftime('%H:%M')
 
-
-            # Query for UPCOMING CLASSES using latest_log_id
             cursor.execute("""
                 SELECT ts.start_time, ts.end_time, s.name AS subject_name,
                        u.name AS faculty_name, r.room_number
@@ -1312,8 +1126,8 @@ def cr_dashboard():
                 subject_progress = cursor.fetchall()
             except mysql.connector.Error:
                 subject_progress = []
+ # Query for NOTIFICATIONS (Not timetable-dependent)
 
-            # Query for NOTIFICATIONS (Not timetable-dependent)
             try:
                 cursor.execute("""
                     SELECT notification_id, message, timestamp, type, seen as is_read
@@ -1324,8 +1138,7 @@ def cr_dashboard():
                 notifications = cursor.fetchall()
             except mysql.connector.Error:
                 notifications = []
-
-            # Query for CANCELLATIONS (Filters by latest log_id)
+      # Query for CANCELLATIONS (Filters by latest log_id)
             try:
                 cursor.execute("""
                     SELECT c.reason, c.timestamp, s.name AS subject_name, u.name AS faculty_name
@@ -1341,7 +1154,6 @@ def cr_dashboard():
             except mysql.connector.Error:
                 cancellation_notifications = []
 
-            # Query for FREE PERIODS (Filters by latest log_id)
             try:
                 cursor.execute("""
                     SELECT ts.start_time, ts.end_time
@@ -1370,14 +1182,13 @@ def cr_dashboard():
             except mysql.connector.Error as err:
                 print(f"Error fetching free periods: {err}")
                 free_periods_today = []
-        
+                
         elif not latest_log_id and cr_section_id and view_mode == 'my_dashboard':
             # This is the new message for a CR with no timetable
             flash("No timetable has been generated for your section yet. Please contact your Academic Coordinator.", "warning")
 
-        # This return statement is now safe
         return render_template('cr_dashboard.html',
-                               view_mode=view_mode, 
+                                view_mode=view_mode, 
                                now=datetime.now(),
                                departments=departments, years=years, semesters=semesters,
                                selected_timetable=selected_timetable, selected_values=selected_values,
@@ -1394,7 +1205,8 @@ def cr_dashboard():
         if connection and connection.is_connected():
             cursor.close()
             connection.close()
-            
+        
+           
 @app.route('/cr/download/csv')
 @login_required('CR')
 def cr_download_timetable_csv():
@@ -1544,8 +1356,10 @@ def get_sections():
         if cursor: cursor.close()
         if connection and connection.is_connected(): connection.close()
 
+# In app.py
 
-# --- Faculty Dashboard Routes ---
+# ... (other code) ...
+
 @app.route('/faculty_dashboard')
 @login_required('faculty')
 def faculty_dashboard():
@@ -1554,7 +1368,10 @@ def faculty_dashboard():
     if conn is None:
         flash('Database connection failed!', 'error')
         return render_template('dashboard.html', notifications=[], substitute_requests=[], lecture_completion=[], faculty_timetable=[], faculty_list=[], current_user_name=session['user_name'])
-    cursor = conn.cursor(dictionary=True)
+    
+    # Use a buffered cursor to read all results immediately
+    cursor = conn.cursor(dictionary=True, buffered=True)
+    
     notifications = []
     substitute_requests = []
     lecture_completion = []
@@ -1563,6 +1380,7 @@ def faculty_dashboard():
     try:
         cursor.execute("SELECT message, timestamp, seen AS is_read FROM notifications WHERE user_id = %s ORDER BY timestamp DESC LIMIT 5", (faculty_id,))
         notifications = cursor.fetchall()
+        
         cursor.execute("""
             SELECT sr.request_id, c.reason AS cancellation_reason, u.name AS requested_by_faculty,
                    s.name AS subject_name, sec.name AS section_name, t.date AS class_date,
@@ -1579,6 +1397,7 @@ def faculty_dashboard():
             ORDER BY sr.responded_at IS NULL DESC, c.timestamp DESC
         """, (faculty_id,))
         substitute_requests = cursor.fetchall()
+        
         cursor.execute("""
             SELECT s.name AS subject_name, sec.name AS section_name, t.date AS class_date,
                    ts.start_time, ts.end_time, 'completed' AS status
@@ -1591,40 +1410,49 @@ def faculty_dashboard():
             ORDER BY t.date DESC LIMIT 5
         """, (faculty_id,))
         lecture_completion = cursor.fetchall()
+
+        # The corrected query: Use LEFT JOIN to get cancellation reason
         cursor.execute("""
             SELECT t.entry_id, t.date AS entry_date, t.day_of_week, ts.start_time, ts.end_time,
                    s.name AS subject_name, sec.name AS section_name, r.room_number,
-                   t.is_cancelled, t.is_completed
+                   t.is_cancelled, t.is_completed, c.reason AS status_reason
             FROM timetable t
             JOIN batch_subjects bs ON t.batch_subject_id = bs.batch_subject_id
             JOIN subjects s ON bs.subject_id = s.subject_id
             JOIN sections sec ON t.section_id = sec.section_id
             JOIN timeslots ts ON t.timeslot_id = ts.timeslot_id
             LEFT JOIN rooms r ON t.room_id = r.room_id
+            LEFT JOIN cancellations c ON t.entry_id = c.timetable_id 
             WHERE t.faculty_id = %s
             ORDER BY t.date, ts.start_time
         """, (faculty_id,))
+        
+        # Process the results from the single query
         for entry in cursor.fetchall():
             entry['start_time'] = str(entry['start_time'])
             entry['end_time'] = str(entry['end_time'])
             entry['entry_date'] = str(entry['entry_date'])
-            if entry['is_completed']: entry['type'] = 'completed'
-            elif entry['is_cancelled']: entry['type'] = 'cancelled'
-            else: entry['type'] = 'scheduled'
-            if entry['type'] == 'cancelled':
-                reason_cursor = conn.cursor(dictionary=True)
-                reason_cursor.execute("SELECT reason FROM cancellations WHERE timetable_id = %s", (entry['entry_id'],))
-                reason_row = reason_cursor.fetchone()
-                if reason_row: entry['status_reason'] = reason_row['reason']
-                reason_cursor.close()
+            if entry['is_completed']:
+                entry['type'] = 'completed'
+            elif entry['is_cancelled']:
+                entry['type'] = 'cancelled'
+            else:
+                entry['type'] = 'scheduled'
             all_timetable_entries.append(entry)
+
         cursor.execute("SELECT user_id AS faculty_id, name AS faculty_name FROM users WHERE role = 'faculty' AND user_id != %s ORDER BY name", (faculty_id,))
         faculty_list = cursor.fetchall()
+        
     except Error as e:
         flash(f"Error fetching dashboard data: {e}", 'error')
+        # Log the error for debugging
+        logger.error(f"Error in faculty_dashboard route: {e}", exc_info=True)
     finally:
-        cursor.close()
-        conn.close()
+        if cursor:
+            cursor.close()
+        if conn and conn.is_connected():
+            conn.close()
+
     return render_template('dashboard.html',
                            current_user_name=session['user_name'],
                            notifications=notifications,
@@ -2393,49 +2221,6 @@ def holidays_management():
         conn.close()
     return render_template('holidays_management.html', holidays=holidays)
 
-@app.route('/timetable_viewer')
-@login_required('academic_coordinator')
-def timetable_viewer():
-    conn = get_db_connection()
-    if conn is None:
-        flash('Database connection failed!', 'error')
-        return redirect(url_for('index1'))
-    cursor = conn.cursor(dictionary=True)
-
-    sections = []
-    faculties = []
-    rooms = []
-    academic_years = []
-    schools = []
-    departments = []
-
-    try:
-        cursor.execute("SELECT school_id, name FROM schools ORDER BY name")
-        schools = cursor.fetchall()
-        cursor.execute("SELECT department_id, name FROM departments ORDER BY name")
-        departments = cursor.fetchall()
-        cursor.execute("SELECT section_id, name FROM sections ORDER BY name")
-        sections = cursor.fetchall()
-        cursor.execute("SELECT user_id, name FROM users WHERE role = 'faculty' ORDER BY name")
-        faculties = cursor.fetchall()
-        cursor.execute("SELECT room_id, room_number FROM rooms ORDER BY room_number")
-        rooms = cursor.fetchall()
-        cursor.execute("SELECT year_id, year_name FROM academic_years ORDER BY year_name DESC")
-        academic_years = cursor.fetchall()
-
-    except Error as e:
-        flash(f"Error fetching filter data: {e}", 'error')
-    finally:
-        cursor.close()
-        conn.close()
-
-    return render_template('timetable_viewer.html',
-                           sections=sections,
-                           faculties=faculties,
-                           rooms=rooms,
-                           academic_years=academic_years,
-                           schools=schools,
-                           departments=departments)
 
 # --- NEW ADD, EDIT, DELETE ROUTES ---
 @app.route('/add/<table_name>', methods=['POST'])
