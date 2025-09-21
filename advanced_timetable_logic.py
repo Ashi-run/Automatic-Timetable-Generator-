@@ -4,55 +4,57 @@ import re
 import numpy as np
 from datetime import datetime, timedelta, date, time
 from collections import defaultdict
-from db_config import get_connection
 import logging
 import mysql.connector
+from mysql.connector import Error
 from contextlib import contextmanager
 import io
 from itertools import groupby
 
+
+class DBConfig:
+    DB_HOST = '127.0.0.1'
+    DB_USER = 'root'
+    DB_PASSWORD = ''
+    DB_NAME = 'reclassify'
+    SECRET_KEY = 'nmims_timetable_secret_key_2025'
+
 # Configure logging: INFO level for general messages, WARNING for issues, ERROR for critical errors.
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(_name_)
-
-# This is the same context manager as in the original code.
-@contextmanager
+logger = logging.getLogger(__name__)
+  
+db_config = {
+    'host': DBConfig.DB_HOST,
+    'user': DBConfig.DB_USER,
+    'password': DBConfig.DB_PASSWORD,
+    'database': DBConfig.DB_NAME
+}
 def get_db_connection():
-    """
-    Context manager to get a new MySQL connection and ensure it's closed.
-    This is used for all database operations to ensure isolated transactions
-    and prevent 'Unread result found' errors.
-    """
-    conn = None
+    """Establishes and returns a database connection using the centralized config."""
     try:
-        conn = get_connection()
-        # Ensure autocommit is off for proper transaction handling
-        conn.autocommit = False
-        yield conn
-    except mysql.connector.Error as e:
-        logger.error(f"Database connection error: {e}", exc_info=True)
-        if conn and conn.is_connected():
-            try:
-                conn.rollback()
-            except Exception as rb_exc:
-                logger.error(f"Error during rollback: {rb_exc}")
-        raise
-    finally:
-        if conn and conn.is_connected():
-            try:
-                # Consume any unread results before closing
-                if hasattr(conn, 'get_warnings') and callable(conn.get_warnings):
-                    conn.get_warnings()
-                conn.close()
-                logger.info("Database connection closed by context manager.")
-            except Exception as e:
-                logger.warning(f"Error closing connection: {e}")
-
+        conn = mysql.connector.connect(
+            host=db_config['host'],
+            user=db_config['user'],
+            password=db_config['password'],
+            database=db_config['database'],
+            autocommit=False,
+            charset='utf8mb4',
+            collation='utf8mb4_unicode_ci'
+        )
+        if conn.is_connected():
+            return conn
+        else:
+            print("Failed to establish database connection")
+            return None
+    except Error as e:
+        print(f"Error connecting to MySQL: {e}")
+        return None
+    
 class TimetableGenerator:
     """
     Generates and manages timetables based on various constraints using a Hybrid NSGA-II.
     """
-    def _init_(self):
+    def __init__(self):
         logger.info("TimetableGenerator initialized. Database connection handled per operation.")
         self.problem_data = {}
         self.population_size = 100
@@ -67,7 +69,7 @@ class TimetableGenerator:
         self.PENALTY_SOFT = 1       # For preferences (e.g., minimizing student gaps)
 
 
-    def _del_(self):
+    def __del__(self):
         pass
 
     def _execute_query(self, query, params=None, fetch_one=False, dictionary_cursor=True):
@@ -150,7 +152,7 @@ class TimetableGenerator:
     def save_timetable_to_db(self, log_id, timetable_data):
         """
         Save the generated timetable entries to the 'timetable' table, linked by log_id.
-        This function adds new entries and does not delete previous timetables.
+        This function *adds* new entries and *does not delete* previous timetables.
         """
         try:
             logger.info(f"Attempting to save timetable entries for log_id {log_id}")
@@ -203,7 +205,7 @@ class TimetableGenerator:
     def _capture_completed_sessions(self, section_id):
         """
         Captures the count of completed sessions (entries with date <= today)
-        and updates the lecture_trackers table.
+        and updates the `lecture_trackers` table.
         """
         logger.info(f"Capturing completed sessions for section {section_id} before deletion.")
         today = date.today()
@@ -296,8 +298,8 @@ class TimetableGenerator:
         """Retrieves a list of all timetable generation logs."""
         query = """
             SELECT tgl.log_id, tgl.generation_date, tgl.status,
-                   s.name as section_name, d.name as department_name, ay.year_name as academic_year,
-                   tgl.total_slots_assigned, tgl.total_slots_required, tgl.generation_time_seconds
+                s.name as section_name, d.name as department_name, ay.year_name as academic_year,
+                tgl.total_slots_assigned, tgl.total_slots_required, tgl.generation_time_seconds
             FROM timetable_generation_log tgl
             JOIN sections s ON tgl.section_id = s.section_id
             JOIN batches b ON s.batch_id = b.batch_id
@@ -305,7 +307,11 @@ class TimetableGenerator:
             JOIN batch_departments bd ON b.batch_id = bd.batch_id
             JOIN departments d ON bd.department_id = d.department_id
             JOIN schools sch ON d.school_id = sch.school_id
-            WHERE 1=1
+            WHERE tgl.log_id IN (
+                SELECT MAX(log_id)
+                FROM timetable_generation_log
+                GROUP BY section_id
+            )
         """
         params = []
         if status_filter:
@@ -319,7 +325,7 @@ class TimetableGenerator:
         except mysql.connector.Error as e:
             logger.error(f"Database error getting all generation logs: {e}", exc_info=True)
             return []
-            
+
     def _translate_violation_messages(self, violations_list, all_timeslots_map=None):
         """
         FIX: Translates raw violation messages with numeric slots into human-readable format.
@@ -359,7 +365,7 @@ class TimetableGenerator:
             else:
                 translated_violations.append(violation_str) # Append original if no slot pattern found
         return translated_violations
-
+    
     def load_specific_timetable(self, log_id):
         """
         Loads a timetable and dynamically includes extra class rows only if they are used.
@@ -383,6 +389,8 @@ class TimetableGenerator:
                 return {"error": "No timeslots found. Cannot format timetable."}
 
             grid, timeslot_labels = self.format_timetable_grid(raw_timetable_data, all_timeslots_for_grid)
+            
+            timetable_by_day = self.format_timetable_by_day(raw_timetable_data)
 
             log_entry = self._execute_query("SELECT * FROM timetable_generation_log WHERE log_id = %s", (log_id,), fetch_one=True)
             if log_entry and log_entry.get('constraints_violated'):
@@ -400,6 +408,7 @@ class TimetableGenerator:
                 'section_name': raw_timetable_data[0]['section_name'],
                 'generation_log': log_entry,
                 'grid': grid,
+                'timetable': timetable_by_day, # FIX: Added the timetable_by_day dictionary here
                 'timeslot_labels': timeslot_labels,
                 'log_id': log_id,
                 'raw_timetable': raw_timetable_data
@@ -407,7 +416,7 @@ class TimetableGenerator:
         except Exception as e:
             logger.error(f"Error loading specific timetable for log_id {log_id}: {str(e)}", exc_info=True)
             return {"error": f"Unexpected error: {str(e)}"}
-        
+           
     def load_specific_timetable_raw(self, log_id):
         """Loads a previously saved timetable for display using its log_id."""
         query = """
@@ -426,6 +435,7 @@ class TimetableGenerator:
             WHERE t.log_id = %s
             ORDER BY t.date, ts.start_time
         """
+
         rows = self._execute_query(query, (log_id,), dictionary_cursor=True)
         if not rows:
             return []
@@ -434,8 +444,11 @@ class TimetableGenerator:
         for row in rows:
             start_time_obj = row['timeslot_start_time']
             end_time_obj = row['timeslot_end_time']
+            
+            # This part correctly converts timedelta from the DB to datetime.time
             if isinstance(start_time_obj, timedelta):
                 start_time_obj = (datetime.min + start_time_obj).time()
+            
             if isinstance(end_time_obj, timedelta):
                 end_time_obj = (datetime.min + end_time_obj).time()
 
@@ -454,14 +467,15 @@ class TimetableGenerator:
                 'room_id': row['room_id'],
                 'room_number': row.get('room_number', 'N/A'),
                 'date': row['date'],
+                'is_rescheduled': row.get('is_rescheduled', 0),
                 'is_lab_session': row['is_lab_session'],
                 'subsection_id': row.get('subsection_id'),
                 'week_number': row['week_number'],
                 'is_rescheduled': row['is_rescheduled'],
                 'academic_year_int': row['academic_year_int'],
                 'semester_int': row['semester_int'],
-                'start_time': start_time_obj.strftime('%H:%M:%S'),
-                'end_time': end_time_obj.strftime('%H:%M:%S')
+                'start_time': start_time_obj,
+                'end_time': end_time_obj
             })
         return timetable_data_for_processing
 
@@ -473,8 +487,9 @@ class TimetableGenerator:
             day = session['day_of_week']
             formatted[day].append(session)
         for day in formatted:
-            if formatted[day]: # Check if the list for the day is not empty
-                formatted[day].sort(key=lambda x: datetime.strptime(x['start_time'], '%H:%M:%S').time())
+            if formatted[day]:
+                # Sort directly by the datetime.time object
+                formatted[day].sort(key=lambda x: x['start_time'])
         return formatted
 
     def format_timetable_grid(self, timetable, timeslots):
@@ -484,19 +499,30 @@ class TimetableGenerator:
         """
         unique_timeslots = {}
         for slot in timeslots:
-            start = (datetime.min + slot['start_time']).time().strftime('%H:%M')
-            end = (datetime.min + slot['end_time']).time().strftime('%H:%M')
+            start_time_obj = slot['start_time']
+            end_time_obj = slot['end_time']
+            if isinstance(start_time_obj, timedelta):
+                start_time_obj = (datetime.min + start_time_obj).time()
+            if isinstance(end_time_obj, timedelta):
+                end_time_obj = (datetime.min + end_time_obj).time()
+            
+            start = start_time_obj.strftime('%H:%M')
+            end = end_time_obj.strftime('%H:%M')
             unique_timeslots[(start, end)] = f"{start}-{end}"
+            
         timeslot_labels = [f"{start}-{end}" for start, end in sorted(unique_timeslots.keys())]
         days_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
         grid = {day: {slot: None for slot in timeslot_labels} for day in days_order}
         merged_cells = set()
-        timetable.sort(key=lambda x: (x['day_of_week'], datetime.strptime(x['start_time'], '%H:%M:%S').time()))
+        
+        # Sort the timetable entries using the consistent datetime.time objects
+        timetable.sort(key=lambda x: (x['day_of_week'], x['start_time']))
 
         for i, session in enumerate(timetable):
             day = session['day_of_week']
-            start_time_str = datetime.strptime(session['start_time'], '%H:%M:%S').time().strftime('%H:%M')
-            end_time_str = datetime.strptime(session['end_time'], '%H:%M:%S').time().strftime('%H:%M')
+            # Correctly format time objects for dictionary lookup
+            start_time_str = session['start_time'].strftime('%H:%M')
+            end_time_str = session['end_time'].strftime('%H:%M')
             time_key = f"{start_time_str}-{end_time_str}"
 
             if (day, time_key) in merged_cells:
@@ -513,10 +539,10 @@ class TimetableGenerator:
                         next_session['day_of_week'] == day and \
                         next_session['subject_name'] == session['subject_name'] and \
                         next_session['faculty_name'] == session['faculty_name'] and \
-                        datetime.strptime(next_session['start_time'], '%H:%M:%S').time() == datetime.strptime(session['end_time'], '%H:%M:%S').time():
+                        next_session['start_time'] == session['end_time']:
                     rowspan = 2
-                    next_start_time = datetime.strptime(session['end_time'], '%H:%M:%S').time().strftime('%H:%M')
-                    next_end_time = datetime.strptime(next_session['end_time'], '%H:%M:%S').time().strftime('%H:%M')
+                    next_start_time = session['end_time'].strftime('%H:%M')
+                    next_end_time = next_session['end_time'].strftime('%H:%M')
                     merged_cells.add((day, f"{next_start_time}-{next_end_time}"))
 
             if day in grid and time_key in grid[day]:
@@ -582,21 +608,21 @@ class TimetableGenerator:
             # 5. Decode the best individual into a usable timetable format
             final_timetable_raw, generation_log = self._decode_solution(best_individual, self.problem_data)
             
-            # FIX: Translate violation messages before saving and returning
+            # FIX: Translate messages when loading old logs
             generation_log['constraints_violated'] = self._translate_violation_messages(
                 generation_log.get('constraints_violated', []),
                 self.problem_data['all_timeslots']
             )
 
             if not final_timetable_raw:
-                generation_log['generation_status'] = 'Partial' # No Failed status
+                generation_log['generation_status'] = 'Partial'
                 generation_log['constraints_violated'].append("Decoded solution produced no valid timetable sessions.")
                 
                 log_id = self.save_generation_log(section_id, generation_log)
                 return {"error": "Timetable generation failed: Decoded solution produced no valid sessions.", "log_id": log_id, "generation_log": generation_log}
                 
             # 6. Save the results
-            generation_log['total_slots_assigned'] = len(best_individual['chromosome'])
+            generation_log['total_slots_assigned'] = len(final_timetable_raw) # Use len(final_timetable_raw)
             generation_log['total_slots_required'] = self.problem_data.get('total_assignments_to_schedule', 0)
             
             # FIX: Implement user's new rule for "Failed" status. Only "Success" or "Partial".
@@ -612,7 +638,7 @@ class TimetableGenerator:
             
             save_success = self.save_timetable_to_db(log_id, {'raw_timetable': final_timetable_raw})
             if not save_success:
-                generation_log['generation_status'] = 'Partial' # No Failed status
+                generation_log['generation_status'] = 'Partial'
                 generation_log['constraints_violated'].append("Failed to save timetable entries to database.")
                 update_query = "UPDATE timetable_generation_log SET status = %s, constraints_violated = %s WHERE log_id = %s"
                 self._execute_dml(update_query, ('Partial', json.dumps(generation_log['constraints_violated']), log_id))
@@ -699,15 +725,18 @@ class TimetableGenerator:
 
         self.holidays = set()
         
+        # FIX: The variable 'data' is not defined here. The list of rooms is 'self.all_rooms'
         return {
             'section_info': section_info,
             'faculty_assignments': faculty_assignments,
             'all_timeslots': self.all_timeslots,
             'all_rooms': self.all_rooms,
+            'all_rooms_list': self.all_rooms, # Correctly referencing the already fetched variable
+            'faculty_assignments_raw': {fa['faculty_subject_id']: fa for fa in faculty_assignments},
             'faculty_constraints': self.faculty_constraints,
             'faculty_unavailability': self.faculty_unavailability,
         }
-
+    
     def _prepare_problem_data(self, data):
         """Converts raw database data into a structured format for the algorithm."""
         assignments = []
@@ -863,7 +892,7 @@ class TimetableGenerator:
             })
         return {'chromosome': chromosome}
     
-    def _create_greedy_individual(self):
+    def _create_greedy_individual(self,):
         """
         FIXED: Creates a single individual with a smarter greedy heuristic that prioritizes labs.
         """
@@ -1288,4 +1317,458 @@ class TimetableGenerator:
                 
         return chromosome
 
-    def _select_next_gene
+    def _select_next_generation(self, combined_population):
+        """Selects the next generation using non-dominated sorting and crowding distance."""
+        self._evaluate_population(combined_population)
+
+        fronts = self._non_dominated_sort(combined_population)
+        next_population = []
+        
+        for i, front in enumerate(fronts):
+            self._calculate_crowding_distance(front)
+            
+            if len(next_population) + len(front) <= self.population_size:
+                next_population.extend(front)
+            else:
+                front.sort(key=lambda x: x.get('crowding_distance', 0), reverse=True)
+                remaining_slots = self.population_size - len(next_population)
+                next_population.extend(front[:remaining_slots])
+                break
+        
+        return next_population
+
+    def _select_best_solution(self, final_fronts):
+        """
+        Selects the best solution from the final Pareto front.
+        Prioritizes solutions with the lowest penalty score.
+        """
+        if not final_fronts:
+            return None
+        
+        best_front = final_fronts[0]
+        
+        # Sort by the primary objective (penalty score), then by the secondary (workload variance)
+        best_front.sort(key=lambda x: (x['objectives'][0], x['objectives'][1]))
+        
+        return best_front[0]
+
+    def _decode_solution(self, individual, problem_data):
+        """
+        Decodes a chromosome into a readable timetable format and calculates the final log.
+        """
+        self._evaluate_individual(individual) # Recalculate to get the final log
+        raw_timetable = []
+        
+        processed_genes = set()
+
+        for gene_idx, gene in enumerate(individual['chromosome']):
+            if gene_idx in processed_genes:
+                continue
+
+            assignment = problem_data['assignments'][gene['assignment_idx']]
+            timeslot_info = problem_data['all_timeslots'][gene['timeslot_id']]
+            
+            day_of_week = self.problem_data['day_map_rev'][gene['day_index']]
+            current_time_obj = (datetime.min + timeslot_info['start_time']).time()
+            
+            for i in range(int(assignment['duration'])):
+                current_slot_info = next((ts for ts in self.problem_data['all_timeslots'].values() if ts['day_of_week'] == day_of_week and (datetime.min + ts['start_time']).time() == current_time_obj), None)
+
+                if not current_slot_info:
+                    logger.warning(f"Could not find slot {i+1} for a multi-hour session. The final schedule may be incomplete.")
+                    continue
+
+                room_info = problem_data['all_rooms'][gene['room_id']]
+                
+                faculty_info = problem_data['faculty_assignments_raw'].get(assignment['assignment_id'])
+                
+                if not faculty_info:
+                    faculty_info = {}
+                
+                raw_timetable.append({
+                    'section_id': problem_data['section_id'],
+                    'section_name': problem_data['section_info']['name'],
+                    'faculty_id': assignment['faculty_id'],
+                    'faculty_name': faculty_info.get('faculty_name', 'Unknown'),
+                    'subject_id': faculty_info.get('subject_id', 0),
+                    'subject_name': faculty_info.get('subject_name', 'Unknown'),
+                    'subject_code': faculty_info.get('subject_code', 'N/A'),
+                    'batch_subject_id': assignment['batch_subject_id'],
+                    'timeslot_id': current_slot_info['timeslot_id'],
+                    'day_of_week': current_slot_info['day_of_week'],
+                    'room_id': gene['room_id'],
+                    'room_number': room_info['room_number'],
+                    'subsection_id': assignment['subsection_id'] if assignment['subsection_id'] != 'full' else None,
+                    'week_number': 1,
+                    'date': date.today(),
+                    'is_rescheduled': 0,
+                    'is_lab_session': assignment['is_lab'],
+                    'start_time': (datetime.min + current_slot_info['start_time']).time(),
+                    'end_time': (datetime.min + current_slot_info['end_time']).time()
+                })
+                current_time_obj = (datetime.min + current_slot_info['end_time']).time()
+
+            processed_genes.add(gene_idx)
+
+        # FIX: Implement user's new rule for "Failed" status. Only "Success" or "Partial".
+        final_penalty = individual['objectives'][0]
+        if final_penalty == 0:
+            status = 'Success'
+        else:
+            status = 'Partial'
+        
+        generation_log = {
+            'constraints_violated': individual.get('violations', []),
+            'total_slots_assigned': len(individual['chromosome']),
+            'total_slots_required': problem_data.get('total_assignments_to_schedule', 0),
+            'generation_status': status
+        }
+        
+        return raw_timetable, generation_log
+    
+def generate_timetable_wrapper(section_id, start_date=None, semester_weeks=1):
+    """Wrapper function to initiate timetable generation."""
+    try:
+        logger.info(f"Starting NSGA-II based timetable generation for section {section_id}")
+        generator = TimetableGenerator()
+        result = generator.generate_timetable_for_section(section_id, start_date, semester_weeks=1)
+        return result
+    except Exception as e:
+        logger.error(f"Wrapper function error: {str(e)}", exc_info=True)
+        return {"error": f"Unexpected error: {str(e)}"}
+
+def generate_csv_output(timetables_data_list):
+    """
+    Generates a CSV string from a list of raw timetable data for multiple sections.
+    Each section's timetable will be preceded by a descriptive header.
+    """
+    output = io.StringIO()
+    days_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+
+    all_timeslot_strings = set()
+    for timetable_raw_container in timetables_data_list:
+        for entry in timetable_raw_container['raw_timetable']:
+            start_time = entry['start_time'].strftime('%H:%M')
+            end_time = entry['end_time'].strftime('%H:%M')
+            all_timeslot_strings.add(f"{start_time}-{end_time}")
+    
+    sorted_timeslot_strings = sorted(list(all_timeslot_strings))
+
+    header_row = ["Day"] + sorted_timeslot_strings
+    
+    for timetable_data in timetables_data_list:
+        section_name = timetable_data['section_name']
+        department_name = timetable_data['department']
+        academic_year_display = f"Year {timetable_data.get('academic_year_int', 'N/A')}"
+        semester_display = f"Semester {timetable_data.get('semester_int', 'N/A')}"
+
+        output.write(f"\n\nTimetable for {department_name} - {academic_year_display} - {semester_display} - Section {section_name}\n")
+        output.write(",".join(header_row) + "\n")
+
+        grid_for_csv = {day: {slot: "" for slot in sorted_timeslot_strings} for day in days_order}
+        
+        for entry in timetable_data['raw_timetable']:
+            day = entry['day_of_week']
+            start_time = entry['start_time'].strftime('%H:%M')
+            end_time = entry['end_time'].strftime('%H:%M')
+            time_key = f"{start_time}-{end_time}"
+            
+            if day in grid_for_csv and time_key in grid_for_csv[day]:
+                faculty_name = entry.get('faculty_name', 'Unassigned')
+                room_number = entry.get('room_number', 'N/A')
+                subject_name = entry['subject_name']
+                
+                cell_content = f"{subject_name} ({faculty_name}) [{room_number}]"
+                
+                if grid_for_csv[day][time_key]:
+                    grid_for_csv[day][time_key] += f" / {cell_content}"
+                else:
+                    grid_for_csv[day][time_key] = cell_content
+
+        for day in days_order:
+            row_data = [day]
+            for slot in sorted_timeslot_strings:
+                content = grid_for_csv[day][slot].replace('"', '""')
+                if ',' in content or '\n' in content:
+                    row_data.append(f'"{content}"')
+                else:
+                    row_data.append(content)
+            output.write(",".join(row_data) + "\n")
+
+    return output.getvalue()
+
+def get_schools():
+    """Retrieves a list of all schools from the database."""
+    with get_db_connection() as conn:
+        cursor = conn.cursor(dictionary=True, buffered=True)
+        try:
+            cursor.execute("SELECT * FROM schools ORDER BY name")
+            result = cursor.fetchall()
+            while cursor.nextset():
+                pass
+            return result
+        finally:
+            cursor.close()
+
+def get_departments_by_school(school_id):
+    """Retrieves departments associated with a specific school."""
+    with get_db_connection() as conn:
+        cursor = conn.cursor(dictionary=True, buffered=True)
+        try:
+            cursor.execute("""
+                SELECT * FROM departments
+                WHERE school_id = %s
+                ORDER BY name
+            """, (school_id,))
+            result = cursor.fetchall()
+            while cursor.nextset():
+                pass
+            return result
+        finally:
+            cursor.close()
+
+def get_academic_years():
+    """Retrieves all academic years from the database."""
+    with get_db_connection() as conn:
+        with conn.cursor(dictionary=True, buffered=True) as cursor:
+            cursor.execute("SELECT * FROM academic_years ORDER BY start_year DESC")
+            result = cursor.fetchall()
+            while cursor.nextset():
+                pass
+            return result
+
+def get_semesters_by_year(year_id):
+    """Retrieves distinct semesters available for a given academic year."""
+    with get_db_connection() as conn:
+        with conn.cursor(dictionary=True, buffered=True) as cursor:
+            cursor.execute("""
+                SELECT DISTINCT semester
+                FROM batches
+                WHERE academic_year_id = %s
+                ORDER BY semester
+            """, (year_id,))
+            result = cursor.fetchall()
+            while cursor.nextset():
+                pass
+            return result
+
+def get_sections_by_filters(school_id=None, dept_id=None, year_id=None, semester=None):
+    """
+    Retrieves sections based on a combination of filters.
+    Fixed to ensure correct joins for all academic years and semesters.
+    """
+    with get_db_connection() as conn:
+        with conn.cursor(dictionary=True, buffered=True) as cursor:
+            query = """
+                SELECT DISTINCT
+                    s.section_id,
+                    s.name as section_name,
+                    s.batch_id,
+                    d.name as department_name,
+                    sch.name as school_name,
+                    ay.year_name as academic_year,
+                    b.semester,
+                    b.year as academic_year_int,
+                    se.total_students
+                FROM sections s
+                JOIN batches b ON s.batch_id = b.batch_id
+                JOIN academic_years ay ON b.academic_year_id = ay.year_id
+                LEFT JOIN section_enrollment se ON s.section_id = se.section_id
+                JOIN batch_departments bd ON b.batch_id = bd.batch_id
+                JOIN departments d ON bd.department_id = d.department_id
+                JOIN schools sch ON d.school_id = sch.school_id
+                WHERE 1=1
+            """
+            params = []
+
+            if school_id:
+                query += " AND sch.school_id = %s"
+                params.append(school_id)
+            if dept_id:
+                query += " AND d.department_id = %s"
+                params.append(dept_id)
+            if year_id is not None and year_id != '':
+                query += " AND b.academic_year_id = %s"
+                params.append(year_id)
+            if semester is not None and semester != '':
+                query += " AND b.semester = %s"
+                params.append(semester)
+
+            query += " ORDER BY sch.name, d.name, ay.start_year DESC, b.semester, s.name"
+            cursor.execute(query, params)
+            result = cursor.fetchall()
+            while cursor.nextset():
+                pass
+            return result
+
+def get_user_school(user_id):
+    """Retrieves the school associated with an academic coordinator user."""
+    with get_db_connection() as conn:
+        with conn.cursor(dictionary=True, buffered=True) as cursor:
+            cursor.execute("""
+                SELECT s.* FROM schools s
+                JOIN academic_coordinators ac ON s.school_id = ac.school_id
+                WHERE ac.user_id = %s AND ac.is_active = 1
+            """, (user_id,))
+            result = cursor.fetchone()
+            while cursor.nextset():
+                pass
+            return result
+
+def authenticate_coordinator(email, school_id=None):
+    """Authenticates an academic coordinator based on email and optional school ID."""
+    with get_db_connection() as conn:
+        with conn.cursor(dictionary=True, buffered=True) as cursor:
+            if school_id:
+                cursor.execute("""
+                    SELECT u.*, ac.school_id, s.name as school_name, s.abbreviation as school_abbr
+                    FROM users u
+                    JOIN academic_coordinators ac ON u.user_id = ac.user_id
+                    JOIN schools s ON ac.school_id = s.school_id
+                    WHERE u.email = %s AND ac.school_id = %s AND ac.is_active = 1
+                """, (email, school_id))
+            else:
+                cursor.execute("""
+                    SELECT u.*, ac.school_id, s.name as school_name, s.abbreviation as school_abbr
+                    FROM users u
+                    JOIN academic_coordinators ac ON u.user_id = ac.user_id
+                    JOIN schools s ON ac.school_id = s.school_id
+                    WHERE u.email = %s AND ac.is_active = 1
+                """, (email,))
+            result = cursor.fetchone()
+            while cursor.nextset():
+                pass
+            return result
+
+def get_semester_dates_by_school(school_id):
+    """
+    Retrieves the start and end dates for the current active semester
+    for a given school.
+    """
+    query = """
+        SELECT sc.start_date, sc.end_date, sc.semester_number, sc.academic_year
+        FROM semester_config sc
+        JOIN semester_info si ON sc.semester_id = si.sem_id
+        WHERE si.school_id = %s AND sc.is_active = 1
+        ORDER BY sc.start_date DESC
+        LIMIT 1
+    """
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor(dictionary=True, buffered=True)
+            cursor.execute(query, (school_id,))
+            result = cursor.fetchone()
+            while cursor.nextset():
+                pass
+            return result
+    except mysql.connector.Error as e:
+        logger.error(f"Database error getting semester dates for school {school_id}: {e}", exc_info=True)
+        return None
+    except Exception as e:
+        logger.error(f"Unexpected error getting semester dates for school {school_id}: {e}", exc_info=True)
+        return None
+
+def get_subject_progress_for_department_and_semester(department_id, semester_number, academic_year_name, semester_start_date, semester_end_date):
+    """
+    Calculates and retrieves subject progress (planned vs. scheduled lectures)
+    for all subjects within a given department for a specific semester.
+    'Scheduled' sessions are defined as entries in the timetable table within the semester dates.
+    """
+    query = """
+        SELECT
+            s.subject_id,
+            s.subject_code,
+            s.name AS subject_name,
+            s.credits AS total_credits_per_week,
+            sec.section_id,
+            sec.name AS section_name,
+            u.name AS faculty_name,
+            bs.batch_subject_id,
+            COUNT(t.entry_id) AS scheduled_sessions_count
+        FROM subjects s
+        JOIN batch_subjects bs ON s.subject_id = bs.subject_id
+        JOIN batches b ON bs.batch_id = b.batch_id
+        JOIN sections sec ON b.batch_id = sec.batch_id
+        JOIN batch_departments bd ON b.batch_id = bd.batch_id
+        JOIN departments d ON bd.department_id = d.department_id
+        JOIN academic_years ay ON b.academic_year_id = ay.year_id
+        LEFT JOIN timetable t ON t.batch_subject_id = bs.batch_subject_id
+                               AND t.section_id = sec.section_id
+                               AND t.date BETWEEN %s AND %s
+        LEFT JOIN users u ON t.faculty_id = u.user_id
+        WHERE d.department_id = %s
+          AND b.semester = %s
+          AND ay.year_name = %s
+        GROUP BY s.subject_id, s.subject_code, s.name, s.credits, sec.section_id, sec.name, u.name, bs.batch_subject_id
+        ORDER BY s.name, sec.name
+    """
+    params = (semester_start_date, semester_end_date, department_id, semester_number, academic_year_name)
+
+    try:
+        raw_data = TimetableGenerator()._execute_query(query, params, dictionary_cursor=True)
+        total_semester_weeks = (semester_end_date - semester_start_date).days // 7 + 1
+
+        subject_progress_summary = defaultdict(lambda: {
+            'subject_id': None,
+            'subject_code': None,
+            'subject_name': None,
+            'total_credits': 0,
+            'planned_sessions_total': 0,
+            'conducted_sessions_total': 0,
+            'completion_percentage': 0.0,
+            'sections': defaultdict(lambda: {
+                'section_id': None,
+                'section_name': None,
+                'faculty_name': 'N/A',
+                'planned_sessions': 0,
+                'conducted_sessions': 0,
+                'completion_percentage': 0.0
+            })
+        })
+
+        for row in raw_data:
+            subject_id = row['subject_id']
+            section_id = row['section_id']
+
+            subject_progress_summary[subject_id]['subject_id'] = subject_id
+            subject_progress_summary[subject_id]['subject_code'] = row['subject_code']
+            subject_progress_summary[subject_id]['subject_name'] = row['subject_name']
+            subject_progress_summary[subject_id]['total_credits'] = row['total_credits_per_week']
+
+            planned_sessions_for_section_subject = row['total_credits_per_week'] * total_semester_weeks
+
+            section_data = subject_progress_summary[subject_id]['sections'][section_id]
+            section_data['section_id'] = section_id
+            section_data['section_name'] = row['section_name']
+            if row['faculty_name']:
+                section_data['faculty_name'] = row['faculty_name']
+            section_data['planned_sessions'] = planned_sessions_for_section_subject
+            section_data['conducted_sessions'] = row['scheduled_sessions_count']
+
+        final_progress_list = []
+        for subject_id, subject_data in subject_progress_summary.items():
+            total_planned_sessions_for_subject_agg = 0
+            total_conducted_sessions_for_subject_agg = 0
+
+            sections_list = []
+            for sec_id, sec_data in subject_data['sections'].items():
+                sec_data['completion_percentage'] = (sec_data['conducted_sessions'] / sec_data['planned_sessions'] * 100) if sec_data['planned_sessions'] > 0 else 0
+                sections_list.append(sec_data)
+                total_planned_sessions_for_subject_agg += sec_data['planned_sessions']
+                total_conducted_sessions_for_subject_agg += sec_data['conducted_sessions']
+
+            subject_data['planned_sessions_total'] = total_planned_sessions_for_subject_agg
+            subject_data['conducted_sessions_total'] = total_conducted_sessions_for_subject_agg
+            subject_data['completion_percentage'] = (total_conducted_sessions_for_subject_agg / total_planned_sessions_for_subject_agg * 100) if total_planned_sessions_for_subject_agg > 0 else 0
+            subject_data['sections'] = sorted(sections_list, key=lambda x: x['section_name'])
+
+            final_progress_list.append(subject_data)
+
+        return sorted(final_progress_list, key=lambda x: x['subject_name'])
+
+    except mysql.connector.Error as e:
+        logger.error(f"Database error getting subject progress for department {department_id}: {e}", exc_info=True)
+        return []
+    except Exception as e:
+        logger.error(f"Unexpected error getting subject progress for department {department_id}: {e}", exc_info=True)
+        return []
