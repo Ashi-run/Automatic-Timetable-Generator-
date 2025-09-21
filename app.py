@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify, redirect, url_for, flash, session, Response, send_file
+from flask import Flask, render_template, request, jsonify, redirect, url_for, flash, session, Response
 from werkzeug.security import generate_password_hash, check_password_hash
 import mysql.connector
 from mysql.connector import Error
@@ -10,10 +10,6 @@ import csv
 import io
 import os
 from decimal import Decimal
-import pandas as pd
-from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
-from datetime import time # Make sure 'time' is imported from datetime
-
 
 # Placeholder for a separate DB configuration file (as in app1.py)
 class DBConfig:
@@ -89,11 +85,6 @@ def login_required(role=None):
             return fn(*args, **kwargs)
         return decorated_view
     return wrapper
-
-@app.context_processor
-def inject_now():
-    """Injects the current datetime into all templates."""
-    return {'now': datetime.now()}
 
 @app.context_processor
 def inject_globals():
@@ -1125,6 +1116,11 @@ def export_timetables_csv():
 @login_required('CR')
 def cr_dashboard():
     cr_section_id = session.get('section_id')
+    cr_subsection_id = session.get('subsection_id')
+    
+    if not cr_section_id:
+        flash("You are a CR but not yet assigned to a section. Please contact your administrator.", "warning")
+        
     user_id = session.get('user_id')
     today = datetime.now().strftime('%A')
     current_time = datetime.now().time()
@@ -1138,7 +1134,7 @@ def cr_dashboard():
 
         cursor = connection.cursor(dictionary=True)
 
-        # --- Fetch data for dropdowns ---
+        # --- Fetch data for dropdowns (always needed for search) ---
         cursor.execute("SELECT department_id, name FROM departments ORDER BY name;")
         departments = cursor.fetchall()
         cursor.execute("SELECT DISTINCT year FROM batches ORDER BY year;")
@@ -1146,24 +1142,22 @@ def cr_dashboard():
         cursor.execute("SELECT DISTINCT semester FROM batches ORDER BY semester;")
         semesters = cursor.fetchall()
 
-        # --- Initialize variables ---
-        my_weekly_timetable = []
-        subject_progress = []
-        notifications = []
-        cancellation_notifications = []
-        selected_timetable = None
+        # --- Initialize variables (as empty by default) ---
+        my_weekly_timetable, subject_progress, notifications, cancellation_notifications = [], [], [], []
+        selected_timetable, upcoming_classes, free_periods_today, my_semester = None, [], [], None
         selected_values = {}
-        dashboard_stats = {}
-        upcoming_classes = []
-        free_periods_today = []
-        my_semester = None
+        dashboard_stats = {} # Use empty dict
+        view_mode = 'my_dashboard' 
 
         if request.method == 'POST':
+            # --- This is the search logic ---
+            view_mode = 'search_result' 
             dept_id = request.form.get('department')
             year = request.form.get('year')
             semester = request.form.get('semester')
             selected_values = {'dept_id': dept_id, 'year': year, 'semester': semester}
 
+            # This query searches ALL logs, which is fine for a general search
             cursor.execute("""
                 SELECT DISTINCT
                     sec.name AS section_name,
@@ -1189,14 +1183,39 @@ def cr_dashboard():
             result = cursor.fetchall()
             selected_timetable = {}
             for row in result:
-                if isinstance(row['start_time'], timedelta): row['start_time'] = (datetime.min + row['start_time']).strftime('%H:%M')
-                if isinstance(row['end_time'], timedelta): row['end_time'] = (datetime.min + row['end_time']).strftime('%H:%M')
+                # Handle timedelta objects for time
+                start_time_val = row['start_time']
+                end_time_val = row['end_time']
+                if isinstance(start_time_val, timedelta):
+                    start_time_val = (datetime.min + start_time_val).time()
+                if isinstance(end_time_val, timedelta):
+                    end_time_val = (datetime.min + end_time_val).time()
+                
+                row['start_time'] = start_time_val.strftime('%H:%M')
+                row['end_time'] = end_time_val.strftime('%H:%M')
+                
                 section = row['section_name']
                 if section not in selected_timetable: selected_timetable[section] = []
                 selected_timetable[section].append(row)
+        
+        
+        # *** THIS IS THE FIX ***
+        # Find the latest log_id for the CR's *own* section
+        latest_log_id = None
+        if cr_section_id:
+            cursor.execute("""
+                SELECT log_id FROM timetable_generation_log
+                WHERE section_id = %s AND (status = 'Success' OR status = 'Partial')
+                ORDER BY generation_date DESC
+                LIMIT 1
+            """, (cr_section_id,))
+            latest_log = cursor.fetchone()
+            if latest_log:
+                latest_log_id = latest_log['log_id']
 
-        else:
-            # This is the GET request block for the default view
+        # This block will now only run if a CR is assigned AND a timetable log exists
+        if cr_section_id and latest_log_id and view_mode == 'my_dashboard':
+            
             cursor.execute("""
                 SELECT b.semester
                 FROM sections s
@@ -1206,6 +1225,7 @@ def cr_dashboard():
             cr_info = cursor.fetchone()
             my_semester = cr_info['semester'] if cr_info else None
 
+            # Query for WEEKLY TIMETABLE using latest_log_id
             cursor.execute("""
                 SELECT DISTINCT
                     tt.day_of_week,
@@ -1222,17 +1242,23 @@ def cr_dashboard():
                 JOIN users u ON tt.faculty_id = u.user_id
                 JOIN timeslots ts ON tt.timeslot_id = ts.timeslot_id
                 LEFT JOIN rooms r ON tt.room_id = r.room_id
-                WHERE tt.section_id = %s AND tt.date IS NOT NULL
+                WHERE tt.section_id = %s AND tt.log_id = %s AND (tt.subsection_id = %s OR tt.subsection_id IS NULL)
                 ORDER BY FIELD(tt.day_of_week, 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'), ts.start_time;
-            """, (cr_section_id,))
+            """, (cr_section_id, latest_log_id, cr_subsection_id))
 
             my_weekly_timetable = cursor.fetchall()
             for entry in my_weekly_timetable:
-                if isinstance(entry['start_time'], timedelta):
-                    entry['start_time'] = (datetime.min + entry['start_time']).strftime('%H:%M')
-                if isinstance(entry['end_time'], timedelta):
-                    entry['end_time'] = (datetime.min + entry['end_time']).strftime('%H:%M')
+                start_time_val = entry['start_time']
+                end_time_val = entry['end_time']
+                if isinstance(start_time_val, timedelta):
+                    start_time_val = (datetime.min + start_time_val).time()
+                if isinstance(end_time_val, timedelta):
+                    end_time_val = (datetime.min + end_time_val).time()
+                entry['start_time'] = start_time_val.strftime('%H:%M')
+                entry['end_time'] = end_time_val.strftime('%H:%M')
 
+
+            # Query for UPCOMING CLASSES using latest_log_id
             cursor.execute("""
                 SELECT ts.start_time, ts.end_time, s.name AS subject_name,
                        u.name AS faculty_name, r.room_number
@@ -1242,16 +1268,21 @@ def cr_dashboard():
                 JOIN users u ON tt.faculty_id = u.user_id
                 JOIN timeslots ts ON tt.timeslot_id = ts.timeslot_id
                 LEFT JOIN rooms r ON tt.room_id = r.room_id
-                WHERE tt.section_id = %s AND tt.day_of_week = %s AND ts.start_time > %s
+                WHERE tt.section_id = %s AND tt.log_id = %s AND (tt.subsection_id = %s OR tt.subsection_id IS NULL) AND tt.day_of_week = %s AND ts.start_time > %s
                 ORDER BY ts.start_time LIMIT 3;
-            """, (cr_section_id, today, current_time))
+            """, (cr_section_id, latest_log_id, cr_subsection_id, today, current_time))
             upcoming_classes = cursor.fetchall()
             for entry in upcoming_classes:
-                if isinstance(entry['start_time'], timedelta):
-                    entry['start_time'] = (datetime.min + entry['start_time']).strftime('%H:%M')
-                if isinstance(entry['end_time'], timedelta):
-                    entry['end_time'] = (datetime.min + entry['end_time']).strftime('%H:%M')
+                start_time_val = entry['start_time']
+                end_time_val = entry['end_time']
+                if isinstance(start_time_val, timedelta):
+                    start_time_val = (datetime.min + start_time_val).time()
+                if isinstance(end_time_val, timedelta):
+                    end_time_val = (datetime.min + end_time_val).time()
+                entry['start_time'] = start_time_val.strftime('%H:%M')
+                entry['end_time'] = end_time_val.strftime('%H:%M')
 
+            # Query for DASHBOARD STATS using latest_log_id
             cursor.execute("""
                 SELECT
                     COUNT(DISTINCT bs.subject_id) as total_subjects,
@@ -1259,11 +1290,12 @@ def cr_dashboard():
                     COUNT(DISTINCT CASE WHEN tt.day_of_week = %s THEN tt.entry_id END) as classes_today
                 FROM timetable tt
                 JOIN batch_subjects bs ON tt.batch_subject_id = bs.batch_subject_id
-                WHERE tt.section_id = %s;
-            """, (today, cr_section_id))
+                WHERE tt.section_id = %s AND tt.log_id = %s AND (tt.subsection_id = %s OR tt.subsection_id IS NULL);
+            """, (today, cr_section_id, latest_log_id, cr_subsection_id))
             stats = cursor.fetchone()
-            dashboard_stats = stats if stats else {'total_subjects': 0, 'total_classes_week': 0, 'classes_today': 0}
+            dashboard_stats = stats if stats else {}
 
+            # Query for SUBJECT PROGRESS (This may or may not need log_id, assuming it's current)
             try:
                 cursor.execute("""
                     SELECT s.name as subject_name,
@@ -1281,6 +1313,7 @@ def cr_dashboard():
             except mysql.connector.Error:
                 subject_progress = []
 
+            # Query for NOTIFICATIONS (Not timetable-dependent)
             try:
                 cursor.execute("""
                     SELECT notification_id, message, timestamp, type, seen as is_read
@@ -1292,6 +1325,7 @@ def cr_dashboard():
             except mysql.connector.Error:
                 notifications = []
 
+            # Query for CANCELLATIONS (Filters by latest log_id)
             try:
                 cursor.execute("""
                     SELECT c.reason, c.timestamp, s.name AS subject_name, u.name AS faculty_name
@@ -1300,13 +1334,14 @@ def cr_dashboard():
                     JOIN batch_subjects bs ON tt.batch_subject_id = bs.batch_subject_id
                     JOIN subjects s ON bs.subject_id = s.subject_id
                     JOIN users u ON tt.faculty_id = u.user_id
-                    WHERE tt.section_id = %s
+                    WHERE tt.section_id = %s AND tt.log_id = %s
                     ORDER BY c.timestamp DESC LIMIT 5;
-                """, (cr_section_id,))
+                """, (cr_section_id, latest_log_id))
                 cancellation_notifications = cursor.fetchall()
             except mysql.connector.Error:
                 cancellation_notifications = []
 
+            # Query for FREE PERIODS (Filters by latest log_id)
             try:
                 cursor.execute("""
                     SELECT ts.start_time, ts.end_time
@@ -1315,22 +1350,35 @@ def cr_dashboard():
                     AND NOT EXISTS (
                         SELECT 1 FROM timetable tt
                         WHERE tt.section_id = %s
+                        AND (tt.subsection_id = %s OR tt.subsection_id IS NULL)
+                        AND tt.log_id = %s
                         AND tt.day_of_week = ts.day_of_week
                         AND tt.timeslot_id = ts.timeslot_id
                     )
                     ORDER BY ts.start_time;
-                """, (today, cr_section_id))
+                """, (today, cr_section_id, latest_log_id, cr_subsection_id))
                 free_periods_today = cursor.fetchall()
                 for period in free_periods_today:
-                    if isinstance(period['start_time'], timedelta):
-                        period['start_time'] = (datetime.min + period['start_time']).strftime('%H:%M')
-                    if isinstance(period['end_time'], timedelta):
-                        period['end_time'] = (datetime.min + period['end_time']).strftime('%H:%M')
+                    start_time_val = period['start_time']
+                    end_time_val = period['end_time']
+                    if isinstance(start_time_val, timedelta):
+                        start_time_val = (datetime.min + start_time_val).time()
+                    if isinstance(end_time_val, timedelta):
+                        end_time_val = (datetime.min + end_time_val).time()
+                    period['start_time'] = start_time_val.strftime('%H:%M')
+                    period['end_time'] = end_time_val.strftime('%H:%M')
             except mysql.connector.Error as err:
                 print(f"Error fetching free periods: {err}")
                 free_periods_today = []
+        
+        elif not latest_log_id and cr_section_id and view_mode == 'my_dashboard':
+            # This is the new message for a CR with no timetable
+            flash("No timetable has been generated for your section yet. Please contact your Academic Coordinator.", "warning")
 
+        # This return statement is now safe
         return render_template('cr_dashboard.html',
+                               view_mode=view_mode, 
+                               now=datetime.now(),
                                departments=departments, years=years, semesters=semesters,
                                selected_timetable=selected_timetable, selected_values=selected_values,
                                my_weekly_timetable=my_weekly_timetable, subject_progress=subject_progress,
@@ -1342,6 +1390,65 @@ def cr_dashboard():
         flash(f"Database query failed: {err}", 'danger')
         print(f"Error details: {err}")
         return render_template('error.html', message=f"A database query failed: {err}")
+    finally:
+        if connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+            
+@app.route('/cr/download/csv')
+@login_required('CR')
+def cr_download_timetable_csv():
+    cr_section_id = session.get('section_id')
+    if not cr_section_id:
+        flash("You must be assigned to a section to download reports.", "warning")
+        return redirect(url_for('cr_dashboard'))
+
+    connection = None
+    try:
+        connection = get_db_connection()
+        cursor = connection.cursor(dictionary=True)
+        cursor.execute("""
+            SELECT tt.day_of_week, ts.start_time, ts.end_time,
+                   s.name AS subject_name, u.name AS faculty_name, r.room_number,
+                   tt.is_lab_session
+            FROM timetable tt
+            JOIN batch_subjects bs ON tt.batch_subject_id = bs.batch_subject_id
+            JOIN subjects s ON bs.subject_id = s.subject_id
+            JOIN users u ON tt.faculty_id = u.user_id
+            JOIN timeslots ts ON tt.timeslot_id = ts.timeslot_id
+            LEFT JOIN rooms r ON tt.room_id = r.room_id
+            WHERE tt.section_id = %s AND tt.date IS NOT NULL
+        """, (cr_section_id,))
+        timetable_data = cursor.fetchall()
+
+        days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+        time_slots = ['09:00 - 10:00', '10:00 - 11:00', '11:00 - 12:00', '12:00 - 13:00', '13:00 - 14:00', '14:00 - 15:00', '15:00 - 16:00', '16:00 - 17:00']
+        
+        # Make sure 'import pandas as pd' is at the top of your app.py
+        df = pd.DataFrame(index=time_slots, columns=days).fillna('')
+        df.index.name = "TIME"
+
+        for entry in timetable_data:
+            start_time_str = (datetime.min + entry['start_time']).strftime('%H:%M') if isinstance(entry['start_time'], timedelta) else entry['start_time'].strftime('%H:%M')
+            end_time_str = (datetime.min + entry['end_time']).strftime('%H:%M') if isinstance(entry['end_time'], timedelta) else entry['end_time'].strftime('%H:%M')
+            slot = f"{start_time_str} - {end_time_str}"
+            day = entry['day_of_week']
+            lab_tag = " (LAB)" if entry['is_lab_session'] else ""
+            cell_content = f"{entry['subject_name']}{lab_tag} / {entry['faculty_name']} / Room: {entry.get('room_number', 'N/A')}"
+            if slot in df.index and day in df.columns:
+                df.loc[slot, day] = cell_content
+        df.loc['13:00 - 14:00'] = "LUNCH BREAK"
+        
+        output = io.StringIO()
+        df.to_csv(output)
+        output.seek(0)
+        
+        return send_file(io.BytesIO(output.getvalue().encode('utf-8')), as_attachment=True, download_name='timetable.csv', mimetype='text/csv')
+
+    except Exception as e:
+        flash(f"An error occurred while generating the CSV file: {e}", "danger")
+        logger.error(f"Error generating CR CSV: {e}", exc_info=True)
+        return redirect(url_for('cr_dashboard'))
     finally:
         if connection and connection.is_connected():
             cursor.close()
@@ -2921,145 +3028,6 @@ def api_sections():
     except Exception as e:
         logger.error(f"Error fetching sections: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
-    
-# *** PASTE THIS ENTIRE BLOCK INTO YOUR APP.PY ***
-
-@app.route('/cr/download/excel')
-@login_required('CR')
-def cr_download_timetable_excel():
-    cr_section_id = session.get('section_id')
-    if not cr_section_id:
-        flash("You must be assigned to a section to download reports.", "warning")
-        return redirect(url_for('cr_dashboard'))
-        
-    connection = None
-    try:
-        connection = get_db_connection() 
-        cursor = connection.cursor(dictionary=True)
-        cursor.execute("""
-            SELECT tt.day_of_week, ts.start_time, ts.end_time,
-                   s.name AS subject_name, u.name AS faculty_name, r.room_number,
-                   tt.is_lab_session
-            FROM timetable tt
-            JOIN batch_subjects bs ON tt.batch_subject_id = bs.batch_subject_id
-            JOIN subjects s ON bs.subject_id = s.subject_id
-            JOIN users u ON tt.faculty_id = u.user_id
-            JOIN timeslots ts ON tt.timeslot_id = ts.timeslot_id
-            LEFT JOIN rooms r ON tt.room_id = r.room_id
-            WHERE tt.section_id = %s AND tt.date IS NOT NULL
-        """, (cr_section_id,))
-        timetable_data = cursor.fetchall()
-
-        days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
-        time_slots = ['09:00 - 10:00', '10:00 - 11:00', '11:00 - 12:00', '12:00 - 13:00', '13:00 - 14:00', '14:00 - 15:00', '15:00 - 16:00', '16:00 - 17:00']
-        
-        # We need to import pandas as pd and openpyxl stuff at the top of app.py
-        # Make sure these are at the top of your app.py file:
-        # import pandas as pd
-        # from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
-        
-        df = pd.DataFrame(index=time_slots, columns=days).fillna('')
-        df.index.name = "TIME"
-        for entry in timetable_data:
-            start_time_str = (datetime.min + entry['start_time']).strftime('%H:%M') if isinstance(entry['start_time'], timedelta) else entry['start_time'].strftime('%H:%M')
-            end_time_str = (datetime.min + entry['end_time']).strftime('%H:%M') if isinstance(entry['end_time'], timedelta) else entry['end_time'].strftime('%H:%M')
-            slot = f"{start_time_str} - {end_time_str}"
-            day = entry['day_of_week']
-            lab_tag = " (LAB)" if entry['is_lab_session'] else ""
-            cell_content = f"{entry['subject_name']}{lab_tag}\n{entry['faculty_name']}\nRoom: {entry.get('room_number', 'N/A')}"
-            if slot in df.index and day in df.columns:
-                df.loc[slot, day] = cell_content
-        df.loc['13:00 - 14:00'] = "LUNCH BREAK"
-        
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df.to_excel(writer, sheet_name='Timetable', startrow=2)
-            ws = writer.sheets['Timetable']
-            header_font = Font(bold=True, color="FFFFFF", size=14)
-            header_fill = PatternFill(start_color="A6262E", end_color="A6262E", fill_type="solid")
-            center_align = Alignment(horizontal='center', vertical='center', wrap_text=True)
-            border_side = Side(style='thin', color='DDDDDD')
-            cell_border = Border(left=border_side, right=border_side, top=border_side, bottom=border_side)
-            ws.merge_cells('A1:G1')
-            title_cell = ws['A1']
-            title_cell.value = f"Timetable for {session.get('class_name', '')}"
-            title_cell.font = header_font
-            title_cell.fill = header_fill
-            title_cell.alignment = center_align
-            for row in ws.iter_rows():
-                for cell in row:
-                    cell.border = cell_border
-                    cell.alignment = center_align
-        output.seek(0)
-        return send_file(output, as_attachment=True, download_name='timetable.xlsx', mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    except Exception as e:
-        flash(f"An error occurred while generating the Excel file: {e}", "danger")
-        logger.error(f"Error generating CR Excel: {e}", exc_info=True)
-        return redirect(url_for('cr_dashboard'))
-    finally:
-        if connection and connection.is_connected():
-            cursor.close()
-            connection.close()
-
-
-@app.route('/cr/download/csv')
-@login_required('CR')
-def cr_download_timetable_csv():
-    cr_section_id = session.get('section_id')
-    if not cr_section_id:
-        flash("You must be assigned to a section to download reports.", "warning")
-        return redirect(url_for('cr_dashboard'))
-
-    connection = None
-    try:
-        connection = get_db_connection()
-        cursor = connection.cursor(dictionary=True)
-        cursor.execute("""
-            SELECT tt.day_of_week, ts.start_time, ts.end_time,
-                   s.name AS subject_name, u.name AS faculty_name, r.room_number,
-                   tt.is_lab_session
-            FROM timetable tt
-            JOIN batch_subjects bs ON tt.batch_subject_id = bs.batch_subject_id
-            JOIN subjects s ON bs.subject_id = s.subject_id
-            JOIN users u ON tt.faculty_id = u.user_id
-            JOIN timeslots ts ON tt.timeslot_id = ts.timeslot_id
-            LEFT JOIN rooms r ON tt.room_id = r.room_id
-            WHERE tt.section_id = %s AND tt.date IS NOT NULL
-        """, (cr_section_id,))
-        timetable_data = cursor.fetchall()
-
-        days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
-        time_slots = ['09:00 - 10:00', '10:00 - 11:00', '11:00 - 12:00', '12:00 - 13:00', '13:00 - 14:00', '14:00 - 15:00', '15:00 - 16:00', '16:00 - 17:00']
-        
-        # Make sure 'import pandas as pd' is at the top of your app.py
-        df = pd.DataFrame(index=time_slots, columns=days).fillna('')
-        df.index.name = "TIME"
-
-        for entry in timetable_data:
-            start_time_str = (datetime.min + entry['start_time']).strftime('%H:%M') if isinstance(entry['start_time'], timedelta) else entry['start_time'].strftime('%H:%M')
-            end_time_str = (datetime.min + entry['end_time']).strftime('%H:%M') if isinstance(entry['end_time'], timedelta) else entry['end_time'].strftime('%H:%M')
-            slot = f"{start_time_str} - {end_time_str}"
-            day = entry['day_of_week']
-            lab_tag = " (LAB)" if entry['is_lab_session'] else ""
-            cell_content = f"{entry['subject_name']}{lab_tag} / {entry['faculty_name']} / Room: {entry.get('room_number', 'N/A')}"
-            if slot in df.index and day in df.columns:
-                df.loc[slot, day] = cell_content
-        df.loc['13:00 - 14:00'] = "LUNCH BREAK"
-        
-        output = io.StringIO()
-        df.to_csv(output)
-        output.seek(0)
-        
-        return send_file(io.BytesIO(output.getvalue().encode('utf-8')), as_attachment=True, download_name='timetable.csv', mimetype='text/csv')
-
-    except Exception as e:
-        flash(f"An error occurred while generating the CSV file: {e}", "danger")
-        logger.error(f"Error generating CR CSV: {e}", exc_info=True)
-        return redirect(url_for('cr_dashboard'))
-    finally:
-        if connection and connection.is_connected():
-            cursor.close()
-            connection.close()
         
 @app.errorhandler(404)
 def page_not_found(e):
