@@ -7,8 +7,7 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700&display=swap" rel="stylesheet">
-     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-    </head>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
     <nav class="navbar navbar-expand-lg navbar-dark shadow-sm navbar-cr-theme">
@@ -19,7 +18,7 @@
                   Welcome, {{ session.user_name }}
                 </span>
                 <form action="{{ url_for('logout') }}" method="post" id="logout-form">
-                    <button type="submit" class="btn btn-outline-light btn-sm">Logout</button>
+                    <button type="submit" class="btn btn-logout">Logout</button>
                 </form>
             </div>
         </div>
@@ -39,86 +38,163 @@
         {% endwith %}
 
         {% if view_mode == 'search_result' %}
-            <div class="card shadow mb-4">
-                <div class="card-header py-3 d-flex justify-content-between align-items-center">
-                    <h6 class="m-0 font-weight-bold text-primary">Timetable Search Results</h6>
-                    <a href="{{ url_for('cr_dashboard') }}" class="btn btn-primary"><i class="fas fa-arrow-left me-2"></i>Back to My Dashboard</a>
+            <div class="card main-card shadow mb-4"> <div class="card-header search-header py-3 d-flex justify-content-between align-items-center"> <h6 class="m-0 font-weight-bold">Timetable Search Results</h6>
+                    <a href="{{ url_for('cr_dashboard') }}" class="btn btn-back-dash"><i class="fas fa-arrow-left me-2"></i>Back to My Dashboard</a>
                 </div>
                 <div class="card-body">
+                    
                     {% if selected_timetable %}
                         {% for section, entries in selected_timetable.items() %}
                             <h4 class="mt-3 mb-3">{{ section }} - Weekly Timetable</h4>
+                            
                             <div class="table-responsive">
-                                 <table class="table table-bordered timetable-grid">
+                                {% set days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] %}
+                                
+                                {% set time_slots_list = [] %}
+                                {% for entry in entries %}
+                                    {% set _ = time_slots_list.append((entry.start_time, entry.start_time + ' - ' + entry.end_time)) %}
+                                {% endfor %}
+                                {% set sorted_time_slots = time_slots_list | unique | sort %}
+                                {% set time_slots = [] %}
+                                {% for slot in sorted_time_slots %}
+                                    {% set _ = time_slots.append(slot[1]) %}
+                                {% endfor %}
+                                {% if "13:00 - 14:00" not in time_slots and "13:00-14:00" not in time_slots %}
+                                     {% set _ = time_slots.insert(4, "13:00 - 14:00") %}
+                                {% endif %}
+
+                                <table class="table timetable-grid mb-0">
                                     <thead>
                                         <tr>
-                                            <th>Day</th>
-                                            <th>Time</th>
-                                            <th>Subject</th>
-                                            <th>Faculty</th>
-                                            <th>Room</th>
+                                            <th>TIME</th>
+                                            {% for day in days %}<th>{{ day }}</th>{% endfor %}
                                         </tr>
                                     </thead>
                                     <tbody>
-                                    {% for entry in entries %}
-                                        <tr>
-                                            <td>{{ entry.day_of_week }}</td>
-                                            <td>{{ entry.start_time }} - {{ entry.end_time }}</td>
-                                            <td>{{ entry.subject_name }}{% if entry.has_lab %} <span class="badge bg-success">LAB</span>{% endif %}</td>
-                                            <td>{{ entry.faculty_name }}</td>
-                                            <td>{{ entry.room_number or 'N/A' }}</td>
-                                        </tr>
-                                    {% endfor %}
+                                        {% for slot in time_slots %}
+                                            {% if slot == '13:00 - 14:00' %}
+                                                <tr class="lunch-break"><td colspan="7">LUNCH BREAK</td></tr>
+                                            {% else %}
+                                                <tr>
+                                                    <td>{{ slot }}</td>
+                                                    {% for day in days %}
+                                                        <td>
+                                                            {% for entry in entries if (entry.start_time + ' - ' + entry.end_time) == slot and entry.day_of_week == day %}
+                                                                <div class="subject-cell">
+                                                                    <strong>{{ entry.subject_name }}</strong>
+                                                                    <small class="text-muted">{{ entry.faculty_name }}</small>
+                                                                    <small class="text-muted">Room: {{ entry.room_number or 'N/A' }}</small>
+                                                                    {% if entry.is_lab_session or entry.has_lab %}
+                                                                        <span class="badge bg-success mt-1">LAB</span>
+                                                                    {% endif %}
+                                                                </div>
+                                                            {% endfor %}
+                                                        </td>
+                                                    {% endfor %}
+                                                </tr>
+                                            {% endif %}
+                                        {% endfor %}
                                     </tbody>
                                 </table>
                             </div>
-                        {% endfor %}
+                            {% endfor %}
                     {% else %}
                         <div class="alert alert-warning">No timetable found for the selected criteria.</div>
                     {% endif %}
+
                 </div>
             </div>
         {% else %}
-            <div class="d-sm-flex align-items-center justify-content-between mb-4">
-                <h1 class="h3 mb-0 text-gray-800"><i class="fas fa-tachometer-alt me-2"></i> My Dashboard (Semester {{ my_semester or 'N/A' }})</h1>
-                <span class="d-none d-sm-inline-block text-gray-600"><i class="fas fa-calendar-alt me-2"></i> {{ now.strftime('%B %d, %Y - %A') }}</span>
+            
+            <div class="dashboard-header-bar">
+                <h1 class="h3 mb-0"><i class="fas fa-tachometer-alt"></i> Semester {{ my_semester or 'N/A' }}</h1>
+                <span class="date-display"><i class="fas fa-calendar-alt me-2"></i> {{ now.strftime('%B %d, %Y - %A') }}</span>
             </div>
             
             <div class="row">
                 <div class="col-xl-3 col-md-6 mb-4">
-                    <div class="card border-left-primary shadow h-100 py-2">
-                        <div class="card-body"><div class="row no-gutters align-items-center"><div class="col mr-2"><div class="text-xs font-weight-bold text-primary text-uppercase mb-1">Total Subjects</div><div class="h5 mb-0 font-weight-bold text-gray-800">{{ dashboard_stats.total_subjects or 0 }}</div></div><div class="col-auto"><i class="fas fa-book fa-2x text-primary"></i></div></div></div>
+                    <div class="stat-card"> <div class="card-body">
+                            <div class="row no-gutters align-items-center">
+                                <div class="col mr-2">
+                                    <div class="stat-text">Total Subjects</div>
+                                    <div class="stat-number">{{ dashboard_stats.total_subjects or 0 }}</div>
+                                </div>
+                                <div class="col-auto">
+                                    <i class="fas fa-book fa-2x stat-icon"></i>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
+
                 <div class="col-xl-3 col-md-6 mb-4">
-                    <div class="card border-left-success shadow h-100 py-2">
-                        <div class="card-body"><div class="row no-gutters align-items-center"><div class="col mr-2"><div class="text-xs font-weight-bold text-success text-uppercase mb-1">Classes Today</div><div class="h5 mb-0 font-weight-bold text-gray-800">{{ dashboard_stats.classes_today or 0 }}</div></div><div class="col-auto"><i class="fas fa-calendar-day fa-2x text-success"></i></div></div></div>
+                    <div class="stat-card"> <div class="card-body">
+                            <div class="row no-gutters align-items-center">
+                                <div class="col mr-2">
+                                    <div class="stat-text">Classes Today</div>
+                                    <div class="stat-number">{{ dashboard_stats.classes_today or 0 }}</div>
+                                </div>
+                                <div class="col-auto">
+                                    <i class="fas fa-calendar-day fa-2x stat-icon"></i>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
+
                 <div class="col-xl-3 col-md-6 mb-4">
-                    <div class="card border-left-info shadow h-100 py-2">
-                        <div class="card-body"><div class="row no-gutters align-items-center"><div class="col mr-2"><div class="text-xs font-weight-bold text-info text-uppercase mb-1">Weekly Classes</div><div class="h5 mb-0 font-weight-bold text-gray-800">{{ dashboard_stats.total_classes_week or 0 }}</div></div><div class="col-auto"><i class="fas fa-calendar-week fa-2x text-info"></i></div></div></div>
+                    <div class="stat-card"> <div class="card-body">
+                            <div class="row no-gutters align-items-center">
+                                <div class="col mr-2">
+                                    <div class="stat-text">Weekly Classes</div>
+                                    <div class="stat-number">{{ dashboard_stats.total_classes_week or 0 }}</div>
+                                </div>
+                                <div class="col-auto">
+                                    <i class="fas fa-calendar-week fa-2x stat-icon"></i>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
+
                 <div class="col-xl-3 col-md-6 mb-4">
-                     <div class="card border-left-warning shadow h-100 py-2">
-                        <div class="card-body"><div class="row no-gutters align-items-center"><div class="col mr-2"><div class="text-xs font-weight-bold text-warning text-uppercase mb-1">Free Periods Today</div><div class="h5 mb-0 font-weight-bold text-gray-800">{{ free_periods_today|length }}</div></div><div class="col-auto"><i class="fas fa-mug-hot fa-2x text-warning"></i></div></div></div>
+                    <div class="stat-card"> <div class="card-body">
+                            <div class="row no-gutters align-items-center">
+                                <div class="col mr-2">
+                                    <div class="stat-text">Free Periods Today</div>
+                                    <div class="stat-number">{{ free_periods_today|length }}</div>
+                                </div>
+                                <div class="col-auto">
+                                    <i class="fas fa-mug-hot fa-2x stat-icon"></i>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
-
-            <div class="card shadow mb-4">
-                <div class="timetable-header card-header py-3 d-flex justify-content-between align-items-center">
-                    <div>
-                        <h2 class="h5 m-0 font-weight-bold">MY WEEKLY SCHEDULE</h2>
-                        <span class="class-room-box mt-2">Class: {{ session.class_name }}</span>
-                    </div>
+            
+            <div class="card main-card shadow mb-4"> <div class="timetable-header card-header py-3"> <div>
+                        <h2 class="h5 m-0">MY WEEKLY SCHEDULE</h2>
+                        <span class="class-name-box mt-2">Class: {{ session.class_name }}</span> </div>
                     <a href="{{ url_for('cr_download_timetable_csv') }}" class="btn btn-sm btn-download"><i class="fas fa-file-csv me-1"></i> Download CSV</a>
                 </div>
                 <div class="card-body p-0">
                     <div class="table-responsive">
                         {% set days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] %}
-                        {% set time_slots = ['09:00 - 10:00', '10:00 - 11:00', '11:00 - 12:00', '12:00 - 13:00', '13:00 - 14:00', '14:00 - 15:00', '15:00 - 16:00', '16:00 - 17:00'] %}
+                        
+                        {% set time_slots_list = [] %}
+                        {% for entry in my_weekly_timetable %}
+                            {% set _ = time_slots_list.append((entry.start_time, entry.start_time + ' - ' + entry.end_time)) %}
+                        {% endfor %}
+                        {% set sorted_time_slots = time_slots_list | unique | sort %}
+                        {% set time_slots = [] %}
+                        {% for slot in sorted_time_slots %}
+                            {% set _ = time_slots.append(slot[1]) %}
+                        {% endfor %}
+                        {% if "13:00 - 14:00" not in time_slots and "13:00-14:00" not in time_slots %}
+                             {% set _ = time_slots.insert(4, "13:00 - 14:00") %}
+                        {% endif %}
+                        
                         <table class="table timetable-grid mb-0">
                             <thead>
                                 <tr>
@@ -157,12 +233,10 @@
             </div>
         {% endif %}
 
-        <div class="card shadow mb-4">
-            <a href="#timetableSearchCollapse" class="d-block card-header py-3" data-bs-toggle="collapse" role="button" aria-expanded="{% if view_mode == 'search_result' %}true{% else %}false{% endif %}" aria-controls="timetableSearchCollapse">
-                <h6 class="m-0 font-weight-bold text-primary"><i class="fas fa-search me-2"></i> View Timetable for Any Class</h6>
+        <div class="card main-card shadow mb-4"> <a href="#timetableSearchCollapse" class="d-block card-header search-header py-3" data-bs-toggle="collapse" role="button" aria-expanded="{% if view_mode == 'search_result' %}true{% else %}false{% endif %}" aria-controls="timetableSearchCollapse">
+                <h6 class="m-0"><i class="fas fa-search me-2"></i> View Timetable for Any Class</h6>
             </a>
-            <div class="collapse {% if view_mode == 'search_result' %}show{% endif %}" id="timetableSearchCollapse">
-                <div class="card-body">
+            <div class="collapse search-form-container {% if view_mode == 'search_result' %}show{% endif %}" id="timetableSearchCollapse"> <div class="card-body">
                     <form id="search-form" method="POST" action="{{ url_for('cr_dashboard') }}">
                         <div class="row">
                             <div class="col-md-3 mb-3">
@@ -194,8 +268,7 @@
                             </div>
                         </div>
                         <div class="mt-2">
-                             <button type="submit" class="btn btn-primary"><i class="fas fa-calendar-check me-2"></i>Fetch Timetable</button>
-                        </div>
+                             <button type="submit" class="btn btn-fetch"><i class="fas fa-calendar-check me-2"></i>Fetch Timetable</button> </div>
                     </form>
                 </div>
             </div>
