@@ -477,64 +477,6 @@ def generation_logs():
         flash(f"An error occurred while loading logs: {str(e)}", "error")
         return redirect(url_for('academic_coordinator_dashboard'))
 
-@app.route("/view_generated_timetable/<int:log_id>")
-@login_required('academic_coordinator')
-def view_generated_timetable(log_id):
-    """Route to view a specific timetable using its log_id."""
-    try:
-        generator = TimetableGenerator()
-        timetable_data = generator.load_specific_timetable(log_id)
-        
-        if not timetable_data or (isinstance(timetable_data, dict) and "error" in timetable_data):
-            error_message = timetable_data.get('error', f"No timetable found for log ID: {log_id}") if isinstance(timetable_data, dict) else f"No timetable found for log ID: {log_id}"
-            flash(error_message, "error")
-            return redirect(url_for('generation_logs'))
-
-        log_entry = timetable_data['generation_log']
-        total_slots = log_entry.get('total_slots_required', 0)
-        assigned_slots = log_entry.get('total_slots_assigned', 0)
-        success_rate = (assigned_slots / total_slots * 100) if total_slots > 0 else 0
-        
-        # The key change is to ensure the constraints_violated is a list of strings
-        constraints_violated = log_entry.get('constraints_violated', [])
-        if isinstance(constraints_violated, str):
-            try:
-                constraints_violated = json.loads(constraints_violated)
-            except json.JSONDecodeError:
-                constraints_violated = [constraints_violated]
-        
-        display_data = {
-            'status': log_entry['status'] if log_entry else 'Unknown',
-            'section_id': timetable_data['section_id'],
-            'section_name': timetable_data['section_name'],
-            'timetable': timetable_data['timetable'],
-            'generation_log': {
-                'constraints_violated': constraints_violated,
-                'total_slots_assigned': assigned_slots,
-                'total_slots_required': total_slots,
-                'generation_status': log_entry.get('status', 'Unknown')
-            },
-            'raw_timetable': timetable_data.get('raw_timetable', []),
-            'grid': timetable_data['grid'],
-            'timeslot_labels': sorted(list(set([t['start_time'].strftime('%H:%M') for t in timetable_data['raw_timetable']]))) if timetable_data['raw_timetable'] else [],
-            'generation_seconds': log_entry.get('generation_time_seconds', 0),
-            'generated_at': log_entry['generation_date'].strftime("%Y-%m-%d %H:%M:%S") if log_entry.get('generation_date') else "N/A",
-            'start_date': timetable_data.get('start_date'),
-            'end_date': timetable_data.get('end_date')
-        }
-
-        return render_template("timetable_display.html",
-                               timetable_data=display_data,
-                               section_id=timetable_data['section_id'],
-                               success_rate=success_rate,
-                               display_constraints=True,
-                               is_generation_result=False,
-                               view_mode=True)
-    except Exception as e:
-        logger.error(f"Error viewing specific timetable log {log_id}: {str(e)}", exc_info=True)
-        flash(f"Error loading timetable: {str(e)}", "error")
-        # Ensure redirection goes to a valid endpoint
-        return redirect(url_for('generation_logs'))
 
 @app.route("/generate_timetable", methods=['GET', 'POST'])
 @login_required('academic_coordinator')
@@ -602,6 +544,67 @@ def generate_timetable():
     
     return redirect(url_for('academic_coordinator_dashboard'))
 
+# In app.py
+
+# ... (other routes and imports) ...
+
+@app.route("/view_generated_timetable/<int:log_id>")
+@login_required('academic_coordinator')
+def view_generated_timetable(log_id):
+    """Route to view a specific timetable using its log_id."""
+    try:
+        generator = TimetableGenerator()
+        timetable_data = generator.load_specific_timetable(log_id)
+        
+        if not timetable_data or (isinstance(timetable_data, dict) and "error" in timetable_data):
+            error_message = timetable_data.get('error', f"No timetable found for log ID: {log_id}") if isinstance(timetable_data, dict) else f"No timetable found for log ID: {log_id}"
+            flash(error_message, "error")
+            return redirect(url_for('generation_logs'))
+
+        log_entry = timetable_data['generation_log']
+        total_slots = log_entry.get('total_slots_required', 0)
+        assigned_slots = log_entry.get('total_slots_assigned', 0)
+        success_rate = (assigned_slots / total_slots * 100) if total_slots > 0 else 0
+        
+        constraints_violated = log_entry.get('constraints_violated', [])
+        if isinstance(constraints_violated, str):
+            try:
+                constraints_violated = json.loads(constraints_violated)
+            except json.JSONDecodeError:
+                constraints_violated = [constraints_violated]
+        
+        display_data = {
+            'status': log_entry['status'] if log_entry else 'Unknown',
+            'section_id': timetable_data['section_id'],
+            'section_name': timetable_data['section_name'],
+            'timetable': timetable_data.get('timetable', {}),
+            'generation_log': {
+                'constraints_violated': constraints_violated,
+                'total_slots_assigned': assigned_slots,
+                'total_slots_required': total_slots,
+                'generation_status': log_entry.get('status', 'Unknown')
+            },
+            'raw_timetable': timetable_data.get('raw_timetable', []),
+            'grid': timetable_data.get('grid', {}),
+            # FIX: Use the correct timeslot_labels directly from the generator function's output
+            'timeslot_labels': timetable_data.get('timeslot_labels', []),
+            'generation_seconds': log_entry.get('generation_time_seconds', 0),
+            'generated_at': log_entry['generation_date'].strftime("%Y-%m-%d %H:%M:%S") if log_entry.get('generation_date') else "N/A",
+            'start_date': timetable_data.get('start_date'),
+            'end_date': timetable_data.get('end_date')
+        }
+
+        return render_template("timetable_display.html",
+                               timetable_data=display_data,
+                               section_id=timetable_data['section_id'],
+                               success_rate=success_rate,
+                               display_constraints=True,
+                               is_generation_result=False,
+                               view_mode=True)
+    except Exception as e:
+        logger.error(f"Error viewing specific timetable log {log_id}: {str(e)}", exc_info=True)
+        flash(f"Error loading timetable: {str(e)}", "error")
+        return redirect(url_for('generation_logs'))
 
 @app.route("/view_timetable/<int:section_id>")
 @login_required('academic_coordinator')
@@ -612,14 +615,14 @@ def view_timetable(section_id):
         generator = TimetableGenerator()
         latest_log_query = """
             SELECT log_id FROM timetable_generation_log
-            WHERE section_id = %s AND status = 'Success'
+            WHERE section_id = %s
             ORDER BY generation_date DESC
             LIMIT 1
         """
         latest_log_entry = generator._execute_query(latest_log_query, (section_id,), fetch_one=True)
 
         if not latest_log_entry:
-            flash(f"No successful timetable generation found for section {section_id}. Please generate one first.", "error")
+            flash(f"No timetable generation found for section {section_id}. Please generate one first.", "error")
             return redirect(url_for('academic_coordinator_dashboard'))
         
         latest_log_id = latest_log_entry['log_id']
@@ -640,7 +643,7 @@ def view_timetable(section_id):
             'status': log_entry['status'] if log_entry else 'Unknown',
             'section_id': timetable_data['section_id'],
             'section_name': timetable_data['section_name'],
-            'timetable': timetable_data['timetable'],
+            'timetable': timetable_data.get('timetable', {}),
             'generation_log': {
                 'constraints_violated': log_entry.get('constraints_violated', []),
                 'total_slots_assigned': assigned_slots,
@@ -648,8 +651,9 @@ def view_timetable(section_id):
                 'generation_status': log_entry.get('status', 'Unknown')
             },
             'raw_timetable': timetable_data.get('raw_timetable', []),
-            'grid': timetable_data['grid'],
-            'timeslot_labels': timetable_data['timeslot_labels'],
+            'grid': timetable_data.get('grid', {}),
+            # FIX: Use the correct timeslot_labels directly from the generator function's output
+            'timeslot_labels': timetable_data.get('timeslot_labels', []),
             'generation_seconds': log_entry.get('generation_time_seconds', 0),
             'generated_at': log_entry['generation_date'].strftime("%Y-%m-%d %H:%M:%S") if log_entry.get('generation_date') else "N/A",
             'start_date': timetable_data.get('start_date'),
@@ -672,7 +676,6 @@ def view_timetable(section_id):
         logger.error(f"Error viewing timetable: {str(e)}", exc_info=True)
         flash(f"Error loading timetable for viewing: {str(e)}", "error")
         return redirect(url_for('academic_coordinator_dashboard'))
-
 
 @app.route("/bulk_generate", methods=['GET'])
 @login_required('academic_coordinator')
