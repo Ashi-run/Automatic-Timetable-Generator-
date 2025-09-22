@@ -8,30 +8,30 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         :root {
-            --nmims-blue: #1e3a8a;
-            --nmims-light-blue: #3b82f6;
-            --nmims-orange: #f97316;
+            --nmims-red: #d32f2f;
+            --nmims-light-red: #ffcdd2;
+            --nmims-dark-red: #b71c1c;
         }
         
         body {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background-color: #f5f5f5;
             min-height: 100vh;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: #333;
         }
         
         .timetable-header {
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(10px);
-            border-radius: 15px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            background-color: var(--nmims-red);
+            color: white;
+            border-bottom: 5px solid var(--nmims-dark-red);
             margin-bottom: 2rem;
+            padding: 1.5rem;
         }
         
         .day-card {
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(10px);
+            background-color: #ffffff;
             border-radius: 15px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
             margin-bottom: 1.5rem;
             border: none;
             transition: transform 0.3s ease;
@@ -42,7 +42,7 @@
         }
         
         .day-header {
-            background: linear-gradient(135deg, var(--nmims-blue), var(--nmims-light-blue));
+            background-color: var(--nmims-red);
             color: white;
             border-radius: 15px 15px 0 0;
             padding: 1rem;
@@ -50,21 +50,21 @@
         }
         
         .session-slot {
-            background: linear-gradient(135deg, #f8fafc, #e2e8f0);
+            background-color: #f8f9fa;
             border-radius: 10px;
             padding: 1rem;
             margin-bottom: 0.5rem;
-            border-left: 4px solid var(--nmims-orange);
+            border-left: 4px solid var(--nmims-red);
             transition: all 0.3s ease;
         }
         
         .session-slot:hover {
-            background: linear-gradient(135deg, #e2e8f0, #cbd5e1);
+            background-color: #e9ecef;
             transform: translateX(5px);
         }
         
         .time-badge {
-            background: var(--nmims-blue);
+            background-color: var(--nmims-dark-red);
             color: white;
             padding: 0.25rem 0.75rem;
             border-radius: 20px;
@@ -74,8 +74,10 @@
         
         .subject-name {
             font-weight: 600;
-            color: var(--nmims-blue);
+            color: var(--nmims-dark-red);
             font-size: 1.1rem;
+            white-space: normal; /* Ensures text wraps */
+            text-align: center;
         }
         
         .faculty-name {
@@ -84,7 +86,7 @@
         }
         
         .room-info {
-            background: var(--nmims-orange);
+            background-color: var(--nmims-red);
             color: white;
             padding: 0.25rem 0.5rem;
             border-radius: 15px;
@@ -93,23 +95,22 @@
         }
         
         .stats-card {
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(10px);
+            background-color: #ffffff;
             border-radius: 15px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
             padding: 1.5rem;
             margin-bottom: 1rem;
         }
         
         .generation-info {
-            background: linear-gradient(135deg, #10b981, #059669);
+            background-color: #4caf50;
             color: white;
             border-radius: 10px;
             padding: 1rem;
         }
         
         .constraint-info {
-            background: linear-gradient(135deg, #f59e0b, #d97706);
+            background-color: #ff9800;
             color: white;
             border-radius: 10px;
             padding: 1rem;
@@ -123,7 +124,7 @@
         }
         
         .btn-back {
-            background: var(--nmims-blue);
+            background-color: var(--nmims-red);
             border: none;
             border-radius: 10px;
             padding: 12px 24px;
@@ -134,13 +135,13 @@
         }
         
         .btn-back:hover {
-            background: var(--nmims-light-blue);
+            background-color: var(--nmims-dark-red);
             color: white;
             transform: translateY(-2px);
         }
         
         .print-btn {
-            background: #10b981;
+            background-color: #4caf50;
             border: none;
             border-radius: 10px;
             padding: 12px 24px;
@@ -162,10 +163,9 @@
             }
         }
 
-        /* Specific styles for the timetable grid cells */
         .timetable-grid-cell {
-            min-width: 150px; /* Adjust as needed */
-            height: 100px; /* Adjust as needed */
+            min-width: 150px;
+            height: 100px;
             vertical-align: top;
             padding: 5px;
             font-size: 0.85rem;
@@ -173,7 +173,7 @@
         }
         .timetable-grid-cell .subject-name {
             font-weight: bold;
-            color: var(--nmims-blue);
+            color: var(--nmims-dark-red);
             font-size: 0.95rem;
         }
         .timetable-grid-cell .faculty-name {
@@ -182,34 +182,41 @@
         }
         .timetable-grid-cell .room-info {
             font-size: 0.75rem;
-            background-color: #e2e8f0;
-            color: #2d3748;
+            background-color: var(--nmims-light-red);
+            color: var(--nmims-dark-red);
             border-radius: 5px;
             padding: 2px 5px;
             margin-top: 5px;
             display: inline-block;
         }
         .timetable-grid-cell.lab {
-            background-color: #e0f7fa; /* Light blue for labs */
-            border-left: 4px solid #00bcd4;
+            background-color: #fce4ec;
+            border-left: 4px solid #ad1457;
         }
         .timetable-grid-cell.lecture {
-            background-color: #f0fdf4; /* Light green for lectures */
-            border-left: 4px solid #4caf50;
+            background-color: #e8f5e9;
+            border-left: 4px solid #388e3c;
+        }
+        .timetable-grid {
+            table-layout: fixed;
+        }
+        .timetable-grid td, .timetable-grid th {
+            width: calc(100% / 7); /* 1 for Time, 6 for days */
+            word-wrap: break-word; /* Allows long text to wrap */
+            overflow-wrap: break-word;
         }
     </style>
 </head>
 <body>
     <div class="container-fluid py-4">
-        <!-- Header -->
         <div class="timetable-header p-4">
             <div class="row align-items-center">
                 <div class="col-md-8">
-                    <h1 class="mb-2">
-                        <i class="fas fa-calendar-week text-primary me-3"></i>
+                    <h1 class="mb-2 text-white">
+                        <i class="fas fa-calendar-week me-3"></i>
                         Timetable - {{ timetable_data.section_name }}
                     </h1>
-                    <p class="text-muted mb-0">
+                    <p class="text-white mb-0">
                         {% if view_mode %}
                             Current Timetable View
                         {% else %}
@@ -228,7 +235,6 @@
             </div>
         </div>
 
-        <!-- Flash Messages Area -->
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
                 <div class="row mb-4">
@@ -246,10 +252,9 @@
 
         <div class="row">
             <div class="col-12">
-                <!-- Timetable Grid Display Card -->
                 <div class="card day-card mb-4">
                     <div class="day-header">
-                        <h4 class="mb-0">
+                        <h4 class="mb-0 text-white">
                             <i class="fas fa-table me-2"></i>
                             Timetable Grid
                         </h4>
@@ -258,7 +263,7 @@
                         {# Always attempt to render the grid if data is available #}
                         {% if timetable_data.grid and timetable_data.timeslot_labels %}
                             <div class="table-responsive">
-                                <table class="table table-bordered align-middle mb-0">
+                                <table class="table table-bordered align-middle mb-0 timetable-grid">
                                     <thead class="table-light">
                                         <tr>
                                             <th style="width:120px;" class="text-center">Time</th>
@@ -268,39 +273,34 @@
                                         </tr>
                                     </thead>
                                    <tbody>
-                                    {% set occupied_cells = {} %}
-                                    {% for time_slot_label in timetable_data.timeslot_labels %}
-                                        <tr>
-                                            <td class="text-center fw-bold bg-light">{{ time_slot_label }}</td>
-                                            {% for day in ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] %}
-                                                {# Check if this cell is part of a previous merged cell #}
-                                                {% if occupied_cells[day] and occupied_cells[day] > 1 %}
-                                                    {% set _ = occupied_cells.update({day: occupied_cells[day] - 1}) %}
-                                                    {# Skip this cell as it's part of a rowspan from the row above #}
-                                                {% else %}
+                                        {% set occupied_cells = {} %}
+                                        {% for time_slot_label in timetable_data.timeslot_labels %}
+                                            <tr>
+                                                <td class="text-center fw-bold bg-light">{{ time_slot_label }}</td>
+                                                {% for day in ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] %}
                                                     {% set session = timetable_data.grid[day][time_slot_label] %}
-                                                    <td class="timetable-grid-cell {% if session %}
-                                                                                    {% if session.is_lab %}lab{% else %}lecture{% endif %}
-                                                                                    {% endif %}"
-                                                        {% if session and session.rowspan > 1 %}
-                                                            rowspan="{{ session.rowspan }}"
-                                                            {% set _ = occupied_cells.update({day: session.rowspan - 1}) %}
-                                                        {% endif %}>
-                                                        {% if session %}
-                                                            <div class="d-flex flex-column h-100 justify-content-center align-items-center">
-                                                                <span class="subject-name">{{ session.subject or 'N/A' }}</span>
-                                                                <small class="faculty-name">{{ session.faculty or 'N/A' }}</small>
-                                                                <span class="room-info mt-1">Room: {{ session.room or 'N/A' }}</span>
-                                                            </div>
-                                                        {% else %}
-                                                            <span class="text-muted fst-italic">Free</span>
-                                                        {% endif %}
-                                                    </td>
-                                                {% endif %}
-                                            {% endfor %}
-                                        </tr>
-                                    {% endfor %}
-                                </tbody>
+                                                    {% if session and session.get('is_merged_cell') %}
+                                                        {# This cell is part of a multi-hour session and should remain empty #}
+                                                    {% else %}
+                                                        <td class="timetable-grid-cell {% if session %}{% if session.is_lab %}lab{% else %}lecture{% endif %}{% endif %}"
+                                                            {% if session and session.get('is_lab') and session.get('duration', 1) > 1 %}
+                                                                {# Since we're not using rowspan, this is for visual indication only if needed #}
+                                                            {% endif %}>
+                                                            {% if session %}
+                                                                <div class="d-flex flex-column h-100 justify-content-center align-items-center">
+                                                                    <span class="subject-name">{{ session.subject or 'N/A' }}</span>
+                                                                    <small class="faculty-name">{{ session.faculty or 'N/A' }}</small>
+                                                                    <span class="room-info mt-1">Room: {{ session.room or 'N/A' }}</span>
+                                                                </div>
+                                                            {% else %}
+                                                                <span class="text-muted fst-italic">Library</span>
+                                                            {% endif %}
+                                                        </td>
+                                                    {% endif %}
+                                                {% endfor %}
+                                            </tr>
+                                        {% endfor %}
+                                    </tbody>
                                 </table>
                             </div>
                         {% else %}
@@ -314,7 +314,6 @@
         </div>
 
         <div class="row">
-            <!-- Quick Summary -->
             <div class="col-lg-6 mb-4">
                 <div class="stats-card h-100">
                     <h5 class="mb-3">
@@ -362,7 +361,6 @@
                 </div>
             </div>
 
-            <!-- Constraint Issues -->
             <div class="col-lg-6 mb-4">
                 {# Only display detailed constraints if there are explicit violations #}
                 {% if timetable_data.generation_log and timetable_data.generation_log.constraints_violated and timetable_data.generation_log.constraints_violated|length > 0 %}
@@ -390,7 +388,6 @@
             </div>
         </div>
 
-        <!-- Actions -->
         <div class="row no-print mt-4">
             <div class="col-12 text-center">
                 <div class="stats-card d-inline-block">
@@ -398,16 +395,17 @@
                         <i class="fas fa-tools text-secondary me-2"></i>
                         Actions
                     </h5>
-                    <div class="d-grid gap-2 d-md-block">
-                        <button class="btn btn-outline-primary me-md-2" onclick="regenerateTimetable()">
-                            <i class="fas fa-redo me-2"></i>Regenerate Timetable
-                        </button>
-                        <button class="btn btn-outline-success me-md-2" onclick="exportTimetable()">
-                            <i class="fas fa-download me-2"></i>Export CSV
-                        </button>
-                        <button class="btn btn-outline-info" onclick="viewAPI()">
-                            <i class="fas fa-code me-2"></i>View JSON
-                        </button>
+                        <div class="d-grid gap-2 d-md-block">
+                            <button class="btn btn-outline-primary me-md-2" onclick="regenerateTimetable()">
+                                <i class="fas fa-redo me-2"></i>Regenerate Timetable
+                            </button>
+                            <a href="{{ url_for('export_single_timetable_xlsx', log_id=timetable_data.log_id) }}" class="btn btn-outline-success me-md-2">
+                                <i class="fas fa-download me-2"></i>Export Excel
+                            </a>
+                            <button class="btn btn-outline-info" onclick="viewAPI()">
+                                <i class="fas fa-code me-2"></i>View JSON
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -429,38 +427,30 @@
             });
         }
 
-        function exportTimetable() {
-            if (!{{ timetable_data.grid|tojson }} || !{{ timetable_data.timeslot_labels|tojson }}) {
-                showCustomAlert('Timetable data is incomplete. Please generate the timetable.');
-                return;
-            }
-            let csv = 'Day,' + {{ timetable_data.timeslot_labels|tojson }}.join(',') + '\n';
-            const daysOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-            
-            daysOrder.forEach(day => {
-                csv += `${day}`;
-                {{ timetable_data.timeslot_labels|tojson }}.forEach(slot => {
-                    const session = {{ timetable_data.grid|tojson }}[day] ? {{ timetable_data.grid|tojson }}[day][slot] : null;
-                    if (session) {
-                        csv += `,"${session.subject || 'N/A'} - ${session.faculty || 'N/A'} (Room: ${session.room || 'N/A'})"`;
-                    } else {
-                        csv += ',-';
-                    }
-                });
-                csv += '\n';
-            });
+    function exportTimetable() {
+        if (!{{ timetable_data.grid|tojson }} || !{{ timetable_data.timeslot_labels|tojson }}) {
+            showCustomAlert('Timetable data is incomplete. Please generate the timetable.');
+            return;
+        }
+
+        const logId = {{ timetable_data.log_id }};
+        if (logId) {
+            window.location.href = `/export_single_timetable_xlsx/${logId}`;
+        } else {
+            showCustomAlert('Cannot export. Log ID not found.');
+        }
+    }
 
             const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
             a.download = `timetable_section_{{ timetable_data.section_id }}_{{ generation_time|replace(" ", "_")|replace(":", "-") }}.csv`;
-            document.body.appendChild(a); // Append to body to ensure it works in all browsers
+            document.body.appendChild(a);
             a.click();
-            document.body.removeChild(a); // Clean up
+            document.body.removeChild(a);
             window.URL.revokeObjectURL(url);
-        }
-
+        
         function viewAPI() {
             window.open(`/api/timetable/{{ timetable_data.section_id }}`, '_blank');
         }
@@ -477,8 +467,8 @@
             document.getElementById('customConfirmModalBody').innerText = message;
             
             const confirmBtn = document.getElementById('customConfirmBtn');
-            const newConfirmBtn = confirmBtn.cloneNode(true); // Clone to remove old event listeners
-            confirmBtn.parentNode.replaceChild(newConfirmBtn, confirmBtn); // Replace old with new
+            const newConfirmBtn = confirmBtn.cloneNode(true);
+            confirmBtn.parentNode.replaceChild(newConfirmBtn, confirmBtn);
             
             newConfirmBtn.onclick = function() {
                 callback();
@@ -488,7 +478,6 @@
         }
     </script>
 
-    <!-- Custom Alert Modal HTML -->
     <div class="modal fade" id="customAlertModal" tabindex="-1" aria-labelledby="customAlertModalLabel" aria-hidden="true">
         <div class="modal-dialog">
             <div class="modal-content">
@@ -497,8 +486,7 @@
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body" id="customAlertModalBody">
-                    <!-- Message will be inserted here -->
-                </div>
+                    </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-primary" data-bs-dismiss="modal">OK</button>
                 </div>
@@ -506,7 +494,6 @@
         </div>
     </div>
 
-    <!-- Custom Confirm Modal HTML -->
     <div class="modal fade" id="customConfirmModal" tabindex="-1" aria-labelledby="customConfirmModalLabel" aria-hidden="true">
         <div class="modal-dialog">
             <div class="modal-content">
@@ -515,8 +502,7 @@
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body" id="customConfirmModalBody">
-                    <!-- Message will be inserted here -->
-                </div>
+                    </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                     <button type="button" class="btn btn-primary" id="customConfirmBtn">Confirm</button>
