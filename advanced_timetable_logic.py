@@ -568,7 +568,7 @@ class TimetableGenerator:
                 room_id = self._select_room(assignment)
 
                 if room_id is None:
-                    violations.append(f"No suitable room could be found for subject {assignment['subject_name']}.")
+                    violations.append(f"No suitable room could be found for subject {assignment['subject_name']} with faculty {assignment['faculty_name']}.")
                     continue
                 
                 # 2. Find a suitable time slot for the entire duration
@@ -610,7 +610,7 @@ class TimetableGenerator:
                         'end_time': timeslot_info['end_time']
                     })
                     
-                    slot_key = (day_idx, timeslot_info['timeslot_id'])
+                    slot_key = (day_idx, timeslot_id)
                     occupied_slots['section'][slot_key].append('full')
                     occupied_slots['faculty'][assignment['faculty_id']].add(slot_key)
                     occupied_slots['room'][room_id].add(slot_key)
@@ -621,7 +621,7 @@ class TimetableGenerator:
                 'constraints_violated': violations,
                 'total_slots_assigned': len(final_timetable),
                 'total_slots_required': self.problem_data.get('total_assignments_to_schedule', 0),
-                'generation_status': 'Partial' if violations else 'Success',
+                'generation_status': 'Partial' if violations or len(final_timetable) < self.problem_data.get('total_assignments_to_schedule', 0) else 'Success',
                 'generation_time_seconds': generation_time.total_seconds()
             }
             
@@ -716,6 +716,7 @@ class TimetableGenerator:
         Prepares a list of all sessions to be scheduled, handling multiple faculty per subject.
         """
         assignments = []
+        total_slots_to_schedule = 0
         
         # Group assignments by subject and batch
         subject_groups = groupby(sorted(data['faculty_assignments'], key=lambda x: x['batch_subject_id']), 
@@ -727,8 +728,9 @@ class TimetableGenerator:
             # Use the first entry to get subject-level details
             first_assignment = assignments_for_subject[0]
             
-            # Create a cycling iterator for faculty assigned to this subject to distribute sessions
-            faculty_cycle = cycle([(fa['faculty_id'], fa['faculty_name']) for fa in assignments_for_subject])
+            # Get the list of faculty assigned to this subject
+            faculty_list = [(fa['faculty_id'], fa['faculty_name']) for fa in assignments_for_subject]
+            faculty_cycle = cycle(faculty_list)
             
             # Use values from the database columns for session counts
             theory_sessions_per_week = first_assignment.get('theory_sessions_per_week', 0)
@@ -741,7 +743,10 @@ class TimetableGenerator:
             preferred_theory_room = data['section_info'].get('theory_room_id')
             is_continuous = first_assignment.get('is_lab_continuous', True)
             
-            # Create theory sessions and assign them to faculty in a round-robin fashion
+            # Add to total slots required for accurate reporting
+            total_slots_to_schedule += theory_sessions_per_week + (lab_sessions_per_week * lab_duration_hours)
+
+            # Create and distribute theory sessions
             for _ in range(theory_sessions_per_week):
                 faculty_id, faculty_name = next(faculty_cycle)
                 assignments.append({
@@ -755,7 +760,7 @@ class TimetableGenerator:
                     'preferred_room_id': preferred_theory_room, 'is_lab_continuous': False
                 })
 
-            # Create lab sessions and assign them to faculty in a round-robin fashion
+            # Create and distribute lab sessions
             for _ in range(lab_sessions_per_week):
                 faculty_id, faculty_name = next(faculty_cycle)
                 assignments.append({
@@ -788,7 +793,7 @@ class TimetableGenerator:
             'section_id': data['section_info']['section_id'],
             'section_info': data['section_info'],
             'assignments': assignments,
-            'total_assignments_to_schedule': len(assignments),
+            'total_assignments_to_schedule': total_slots_to_schedule,
             'possible_slots': possible_slots,
             'all_timeslots': {ts['timeslot_id']: ts for ts in data['all_timeslots']},
             'all_rooms': {r['room_id']: r for r in data['all_rooms']},
