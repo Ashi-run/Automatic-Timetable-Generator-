@@ -6,9 +6,14 @@ import json
 import logging
 from datetime import datetime, timedelta, date
 from functools import wraps
+import openpyxl
 import csv
 import io
 import os
+from openpyxl.styles import Alignment
+from openpyxl.utils import get_column_letter
+import pandas as pd
+from pandas import ExcelWriter
 from decimal import Decimal
 from advanced_timetable_logic import (
     generate_timetable_wrapper,
@@ -543,11 +548,7 @@ def generate_timetable():
         flash(f"System error during timetable generation: {str(e)}", "error")
     
     return redirect(url_for('academic_coordinator_dashboard'))
-
-# In app.py
-
-# ... (other routes and imports) ...
-
+    
 @app.route("/view_generated_timetable/<int:log_id>")
 @login_required('academic_coordinator')
 def view_generated_timetable(log_id):
@@ -556,8 +557,8 @@ def view_generated_timetable(log_id):
         generator = TimetableGenerator()
         timetable_data = generator.load_specific_timetable(log_id)
         
-        if not timetable_data or (isinstance(timetable_data, dict) and "error" in timetable_data):
-            error_message = timetable_data.get('error', f"No timetable found for log ID: {log_id}") if isinstance(timetable_data, dict) else f"No timetable found for log ID: {log_id}"
+        if isinstance(timetable_data, dict) and 'error' in timetable_data:
+            error_message = timetable_data.get('error', f"No timetable found for log ID: {log_id}")
             flash(error_message, "error")
             return redirect(url_for('generation_logs'))
 
@@ -586,12 +587,12 @@ def view_generated_timetable(log_id):
             },
             'raw_timetable': timetable_data.get('raw_timetable', []),
             'grid': timetable_data.get('grid', {}),
-            # FIX: Use the correct timeslot_labels directly from the generator function's output
             'timeslot_labels': timetable_data.get('timeslot_labels', []),
             'generation_seconds': log_entry.get('generation_time_seconds', 0),
             'generated_at': log_entry['generation_date'].strftime("%Y-%m-%d %H:%M:%S") if log_entry.get('generation_date') else "N/A",
             'start_date': timetable_data.get('start_date'),
-            'end_date': timetable_data.get('end_date')
+            'end_date': timetable_data.get('end_date'),
+            'log_id': log_id # Add the log_id to the dictionary
         }
 
         return render_template("timetable_display.html",
@@ -675,6 +676,278 @@ def view_timetable(section_id):
     except Exception as e:
         logger.error(f"Error viewing timetable: {str(e)}", exc_info=True)
         flash(f"Error loading timetable for viewing: {str(e)}", "error")
+        return redirect(url_for('academic_coordinator_dashboard'))
+    
+# In app.py
+
+# ... (other code) ...
+
+@app.route("/export_single_timetable_xlsx/<int:log_id>")
+@login_required('academic_coordinator')
+def export_single_timetable_xlsx(log_id):
+    """
+    Exports a single timetable to a formatted Excel file using its log_id.
+    """
+    try:
+        generator = TimetableGenerator()
+        raw_data = generator.load_specific_timetable_raw(log_id)
+
+        if not raw_data:
+            flash("No timetable data found for this log ID.", "warning")
+            return redirect(url_for('generation_logs'))
+
+        output = io.BytesIO()
+        writer = pd.ExcelWriter(output, engine='openpyxl')
+        
+        days_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+
+        # Get all unique timeslot strings for the header
+        all_timeslot_strings = set()
+        for entry in raw_data:
+            start_time = entry['start_time'].strftime('%H:%M')
+            end_time = entry['end_time'].strftime('%H:%M')
+            all_timeslot_strings.add(f"{start_time}-{end_time}")
+        
+        sorted_timeslot_strings = sorted(list(all_timeslot_strings))
+
+        section_name = raw_data[0]['section_name']
+        
+        grid_for_excel = {time_slot: {day: "" for day in days_order} for time_slot in sorted_timeslot_strings}
+        
+        for entry in raw_data:
+            day = entry['day_of_week']
+            start_time = entry['start_time'].strftime('%H:%M')
+            end_time = entry['end_time'].strftime('%H:%M')
+            time_key = f"{start_time}-{end_time}"
+            
+            faculty_name = entry.get('faculty_name', 'Unassigned')
+            room_number = entry.get('room_number', 'N/A')
+            subject_name = entry['subject_name']
+            is_lab = entry['is_lab_session']
+            
+            cell_content = f"{subject_name}\n({faculty_name})\nRoom: {room_number}"
+            if is_lab:
+                cell_content += "\n(LAB)"
+
+            if grid_for_excel[time_key][day]:
+                grid_for_excel[time_key][day] += f" / {cell_content}"
+            else:
+                grid_for_excel[time_key][day] = cell_content
+        
+        df = pd.DataFrame(grid_for_excel).T
+        df.index.name = "Time"
+        df.columns = days_order
+        
+        sheet_name = section_name.replace("/", "_").replace(":", "_").replace("*", "_")
+        df.to_excel(writer, sheet_name=sheet_name)
+        
+        writer.close()
+        output.seek(0)
+        
+        workbook = openpyxl.load_workbook(output)
+        worksheet = workbook.active
+        
+        for row in worksheet.iter_rows():
+            worksheet.row_dimensions[row[0].row].height = 60
+            for cell in row:
+                cell.alignment = Alignment(wrap_text=True, vertical='top')
+
+        for col_idx, col_name in enumerate(['Time'] + days_order):
+            column_letter = get_column_letter(col_idx + 1)
+            max_length = 0
+            for cell in worksheet[column_letter]:
+                try:
+                    if cell.value:
+                        lines = str(cell.value).split('\n')
+                        line_lengths = [len(line) for line in lines]
+                        if line_lengths:
+                            max_length = max(max_length, max(line_lengths))
+                except:
+                    pass
+            
+            adjusted_width = max_length + 2
+            if col_name == 'Time':
+                worksheet.column_dimensions[column_letter].width = 15
+            else:
+                worksheet.column_dimensions[column_letter].width = max(adjusted_width, 20)
+
+        output_formatted = io.BytesIO()
+        workbook.save(output_formatted)
+        output_formatted.seek(0)
+
+        filename = f"{section_name}_Timetable.xlsx"
+        
+        return Response(
+            output_formatted.getvalue(),
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            headers={'Content-Disposition': f'attachment;filename={filename}'}
+        )
+
+    except Exception as e:
+        logger.error(f"Error during single XLSX export for log ID {log_id}: {str(e)}", exc_info=True)
+        flash(f"An unexpected error occurred during export: {str(e)}", "error")
+        return redirect(url_for('view_generated_timetable', log_id=log_id))
+
+@app.route("/export_timetables_xlsx")
+@login_required('academic_coordinator')
+def export_timetables_xlsx():
+    """
+    Exports timetables for selected filters (or whole department) to a multi-sheet Excel file.
+    """
+    try:
+        school_id = request.args.get('school_id', type=int)
+        department_id = request.args.get('department_id', type=int)
+        year_id = request.args.get('year_id')
+        semester = request.args.get('semester')
+
+        if year_id:
+            year_id = int(year_id)
+        if semester:
+            semester = int(semester)
+
+        if not all([school_id, department_id]):
+            flash("Please select at least School and Department to export timetables.", "error")
+            return redirect(url_for('academic_coordinator_dashboard'))
+
+        sections_to_export = get_sections_by_filters(
+            school_id=school_id,
+            dept_id=department_id,
+            year_id=year_id,
+            semester=semester
+        )
+
+        if not sections_to_export:
+            flash("No sections found for the selected filters to export.", "warning")
+            return redirect(url_for('academic_coordinator_dashboard'))
+
+        output = io.BytesIO()
+        writer = pd.ExcelWriter(output, engine='openpyxl')
+        generator = TimetableGenerator()
+        days_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+
+        all_timeslot_strings = set()
+        all_raw_data = []
+        for section in sections_to_export:
+            section_id = section['section_id']
+            latest_log_query = """
+                SELECT log_id FROM timetable_generation_log
+                WHERE section_id = %s AND (status = 'Success' OR status = 'Partial')
+                ORDER BY generation_date DESC
+                LIMIT 1
+            """
+            latest_log_entry = generator._execute_query(latest_log_query, (section_id,), fetch_one=True)
+
+            if latest_log_entry:
+                log_id = latest_log_entry['log_id']
+                raw_data = generator.load_specific_timetable_raw(log_id)
+                if raw_data:
+                    all_raw_data.append(raw_data)
+                    for entry in raw_data:
+                        start_time = entry['start_time'].strftime('%H:%M')
+                        end_time = entry['end_time'].strftime('%H:%M')
+                        all_timeslot_strings.add(f"{start_time}-{end_time}")
+
+        if not all_raw_data:
+            flash("No generated timetables found for the selected criteria to export.", "warning")
+            return redirect(url_for('academic_coordinator_dashboard'))
+
+        sorted_timeslot_strings = sorted(list(all_timeslot_strings))
+        
+        for raw_data in all_raw_data:
+            if not raw_data:
+                continue
+
+            section_name = raw_data[0]['section_name']
+            
+            grid_for_excel = {time_slot: {day: "" for day in days_order} for time_slot in sorted_timeslot_strings}
+            
+            for entry in raw_data:
+                day = entry['day_of_week']
+                start_time = entry['start_time'].strftime('%H:%M')
+                end_time = entry['end_time'].strftime('%H:%M')
+                time_key = f"{start_time}-{end_time}"
+
+                faculty_name = entry.get('faculty_name', 'Unassigned')
+                room_number = entry.get('room_number', 'N/A')
+                subject_name = entry['subject_name']
+                is_lab = entry['is_lab_session']
+                
+                cell_content = f"{subject_name}\n({faculty_name})\nRoom: {room_number}"
+                if is_lab:
+                    cell_content += "\n(LAB)"
+
+                if grid_for_excel[time_key][day]:
+                    grid_for_excel[time_key][day] += f" / {cell_content}"
+                else:
+                    grid_for_excel[time_key][day] = cell_content
+            
+            df = pd.DataFrame(grid_for_excel).T
+            df.index.name = "Time"
+            df.columns = days_order
+            
+            sheet_name = section_name.replace("/", "_").replace(":", "_").replace("*", "_")
+            df.to_excel(writer, sheet_name=sheet_name)
+        
+        writer.close()
+        output.seek(0)
+        
+        workbook = openpyxl.load_workbook(output)
+        
+        for sheet_name in workbook.sheetnames:
+            worksheet = workbook[sheet_name]
+            
+            # Set a standard height for all rows
+            for row in worksheet.iter_rows():
+                worksheet.row_dimensions[row[0].row].height = 60
+            
+            # Adjust column widths and apply text wrapping
+            for col in range(1, len(days_order) + 2): # +2 for the 'Time' column and 0-based index
+                column_letter = get_column_letter(col)
+                max_length = 0
+                for cell in worksheet[column_letter]:
+                    cell.alignment = Alignment(wrap_text=True, vertical='top')
+                    try:
+                        if cell.value:
+                            # Calculate max length based on lines
+                            lines = str(cell.value).split('\n')
+                            line_lengths = [len(line) for line in lines]
+                            if line_lengths:
+                                max_length = max(max_length, max(line_lengths))
+                    except:
+                        pass
+                
+                # Set a minimum width and adjust for content
+                adjusted_width = (max_length + 2) if max_length > 15 else 20
+                worksheet.column_dimensions[column_letter].width = adjusted_width
+
+            # Set a specific width for the Time column
+            worksheet.column_dimensions['A'].width = 15
+        
+        output_formatted = io.BytesIO()
+        workbook.save(output_formatted)
+        output_formatted.seek(0)
+
+        filename_parts = [session.get('school_abbr', 'Timetable')]
+        if department_id:
+            dept_name = next((d['name'] for d in get_departments_by_school(school_id) if d['department_id'] == department_id), 'Dept')
+            filename_parts.append(dept_name.replace(" ", "_"))
+        if year_id:
+            year_name = next((y['year_name'] for y in get_academic_years() if y['year_id'] == year_id), 'Year')
+            filename_parts.append(year_name.replace(" ", "_"))
+        if semester:
+            filename_parts.append(f"Sem_{semester}")
+        
+        filename = "_".join(filename_parts) + "_Timetables.xlsx"
+        
+        return Response(
+            output_formatted.getvalue(),
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            headers={'Content-Disposition': f'attachment;filename={filename}'}
+        )
+
+    except Exception as e:
+        logger.error(f"Error during XLSX export: {str(e)}", exc_info=True)
+        flash(f"An unexpected error occurred during XLSX export: {str(e)}", "error")
         return redirect(url_for('academic_coordinator_dashboard'))
 
 @app.route("/bulk_generate", methods=['GET'])
