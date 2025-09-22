@@ -436,3 +436,50 @@ h4.section-title i {
 #content-wrapper {
     background-color: #f8f9fa;
 }
+/* --- ADD THIS TO THE END of your style.css --- */
+
+/* --- FINAL Timetable Grid, THICK V&H Lines, & Font Weight --- */
+
+/* 1. Makes headers (TIME, MONDAY, etc.) EXTRA BOLD + THICK LINES */
+.timetable-grid thead th {
+    font-weight: 900; 
+    font-size: 0.9rem;
+    color: #000; 
+    border-left: 2px solid #ced4da; /* THICKER Vertical line */
+    border-top: 2px solid #ced4da;  /* NEW THICKER Horizontal line */
+}
+
+/* 2. Makes the time values (09:00 - 10:00) EXTRA BOLD + THICK LINES */
+/* This targets the <td> cells in the first column */
+.timetable-grid tbody td:first-child {
+    font-weight: 900; 
+    color: #000; 
+    border-top: 2px solid #ced4da;  /* NEW THICKER Horizontal line */
+}
+/* This targets the <th> header cell in the body (if any) */
+.timetable-grid tbody th { 
+    border-top: 2px solid #ced4da;  /* NEW THICKER Horizontal line */
+}
+
+
+/* 3. Makes the subject text inside the grid LESS BOLD */
+.subject-cell strong {
+    font-weight: 600; /* Semi-bold */
+}
+
+/* 4. Makes the faculty/room text NORMAL */
+.subject-cell small {
+    font-weight: 400; /* Normal */
+}
+
+/* 5. Adds the THICKER lines to all other cells */
+.timetable-grid tbody td {
+    border-left: 2px solid #ced4da; /* THICKER Vertical line */
+    border-top: 2px solid #ced4da;  /* NEW THICKER Horizontal line */
+}
+
+/* 6. Removes the extra border from the first column */
+.timetable-grid thead th:first-child,
+.timetable-grid tbody td:first-child {
+    border-left: none;
+}
