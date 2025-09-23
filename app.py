@@ -53,6 +53,9 @@ db_config = {
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 # --- UTILITY FUNCTIONS ---
 
 def get_db_connection():
@@ -548,7 +551,7 @@ def generate_timetable():
         flash(f"System error during timetable generation: {str(e)}", "error")
     
     return redirect(url_for('academic_coordinator_dashboard'))
-    
+
 @app.route("/view_generated_timetable/<int:log_id>")
 @login_required('academic_coordinator')
 def view_generated_timetable(log_id):
@@ -1632,10 +1635,7 @@ def get_sections():
         if cursor: cursor.close()
         if connection and connection.is_connected(): connection.close()
 
-# In app.py
-
-# ... (other code) ...
-
+# --- Faculty Dashboard Routes ---
 @app.route('/faculty_dashboard')
 @login_required('faculty')
 def faculty_dashboard():
@@ -1644,19 +1644,20 @@ def faculty_dashboard():
     if conn is None:
         flash('Database connection failed!', 'error')
         return render_template('dashboard.html', notifications=[], substitute_requests=[], lecture_completion=[], faculty_timetable=[], faculty_list=[], current_user_name=session['user_name'])
-    
-    # Use a buffered cursor to read all results immediately
+
     cursor = conn.cursor(dictionary=True, buffered=True)
-    
     notifications = []
     substitute_requests = []
     lecture_completion = []
     all_timetable_entries = []
     faculty_list = []
+
     try:
+        # Fetch notifications
         cursor.execute("SELECT message, timestamp, seen AS is_read FROM notifications WHERE user_id = %s ORDER BY timestamp DESC LIMIT 5", (faculty_id,))
         notifications = cursor.fetchall()
-        
+
+        # Fetch substitute requests
         cursor.execute("""
             SELECT sr.request_id, c.reason AS cancellation_reason, u.name AS requested_by_faculty,
                    s.name AS subject_name, sec.name AS section_name, t.date AS class_date,
@@ -1673,7 +1674,8 @@ def faculty_dashboard():
             ORDER BY sr.responded_at IS NULL DESC, c.timestamp DESC
         """, (faculty_id,))
         substitute_requests = cursor.fetchall()
-        
+
+        # Fetch lecture completion data
         cursor.execute("""
             SELECT s.name AS subject_name, sec.name AS section_name, t.date AS class_date,
                    ts.start_time, ts.end_time, 'completed' AS status
@@ -1687,42 +1689,106 @@ def faculty_dashboard():
         """, (faculty_id,))
         lecture_completion = cursor.fetchall()
 
-        # The corrected query: Use LEFT JOIN to get cancellation reason
+        # CORRECTED QUERY: Find the latest log_id for each section the faculty teaches
         cursor.execute("""
-            SELECT t.entry_id, t.date AS entry_date, t.day_of_week, ts.start_time, ts.end_time,
-                   s.name AS subject_name, sec.name AS section_name, r.room_number,
-                   t.is_cancelled, t.is_completed, c.reason AS status_reason
-            FROM timetable t
-            JOIN batch_subjects bs ON t.batch_subject_id = bs.batch_subject_id
-            JOIN subjects s ON bs.subject_id = s.subject_id
-            JOIN sections sec ON t.section_id = sec.section_id
-            JOIN timeslots ts ON t.timeslot_id = ts.timeslot_id
-            LEFT JOIN rooms r ON t.room_id = r.room_id
-            LEFT JOIN cancellations c ON t.entry_id = c.timetable_id 
-            WHERE t.faculty_id = %s
-            ORDER BY t.date, ts.start_time
+            SELECT
+                fs.section_id,
+                MAX(tgl.log_id) AS latest_log_id
+            FROM faculty_subjects fs
+            JOIN timetable_generation_log tgl ON fs.section_id = tgl.section_id
+            WHERE fs.faculty_id = %s AND (tgl.status = 'Success' OR tgl.status = 'Partial')
+            GROUP BY fs.section_id;
         """, (faculty_id,))
-        
-        # Process the results from the single query
-        for entry in cursor.fetchall():
-            entry['start_time'] = str(entry['start_time'])
-            entry['end_time'] = str(entry['end_time'])
-            entry['entry_date'] = str(entry['entry_date'])
-            if entry['is_completed']:
-                entry['type'] = 'completed'
-            elif entry['is_cancelled']:
-                entry['type'] = 'cancelled'
-            else:
-                entry['type'] = 'scheduled'
-            all_timetable_entries.append(entry)
+        section_logs = cursor.fetchall()
 
+        if section_logs:
+            where_clauses = []
+            params = []
+            for log in section_logs:
+                where_clauses.append("(t.section_id = %s AND t.log_id = %s)")
+                params.append(log['section_id'])
+                params.append(log['latest_log_id'])
+
+            params.insert(0, faculty_id)
+
+            query = f"""
+                SELECT
+                    t.entry_id, t.date AS entry_date, t.day_of_week, ts.start_time, ts.end_time,
+                    s.name AS subject_name, sec.name AS section_name, r.room_number,
+                    t.is_cancelled, t.is_completed, t.is_rescheduled, c.reason AS status_reason
+                FROM timetable t
+                JOIN batch_subjects bs ON t.batch_subject_id = bs.batch_subject_id
+                JOIN subjects s ON bs.subject_id = s.subject_id
+                JOIN sections sec ON t.section_id = sec.section_id
+                JOIN timeslots ts ON t.timeslot_id = ts.timeslot_id
+                LEFT JOIN rooms r ON t.room_id = r.room_id
+                LEFT JOIN cancellations c ON t.entry_id = c.timetable_id
+                WHERE t.faculty_id = %s AND ({' OR '.join(where_clauses)})
+                ORDER BY FIELD(t.day_of_week, 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'), ts.start_time
+            """
+            
+            cursor.execute(query, tuple(params))
+            
+            # Process the raw data to group entries by day and time slot
+            raw_entries = cursor.fetchall()
+            
+            # A dictionary to hold grouped timetable entries
+            grouped_timetable = {}
+
+            for entry in raw_entries:
+                entry['start_time'] = str(entry['start_time'])
+                entry['end_time'] = str(entry['end_time'])
+                entry['entry_date'] = str(entry['entry_date'])
+
+                if entry['is_completed'] == 1:
+                    entry['type'] = 'completed'
+                elif entry['is_cancelled'] == 1:
+                    entry['type'] = 'cancelled'
+                elif entry['is_rescheduled'] == 1:
+                    entry['type'] = 'rescheduled'
+                else:
+                    entry['type'] = 'scheduled'
+                
+                day = entry['day_of_week']
+                timeslot = entry['start_time']
+                
+                if day not in grouped_timetable:
+                    grouped_timetable[day] = {}
+                
+                if timeslot not in grouped_timetable[day]:
+                    grouped_timetable[day][timeslot] = []
+                    
+                grouped_timetable[day][timeslot].append(entry)
+
+            # Re-format the data for easier rendering in the template
+            all_timetable_entries = []
+            days_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+            time_slots = [
+                ('09:00:00', '10:00:00'), ('10:00:00', '11:00:00'), ('11:00:00', '12:00:00'), 
+                ('12:00:00', '13:00:00'), ('13:00:00', '14:00:00'), ('14:00:00', '15:00:00'), 
+                ('15:00:00', '16:00:00'), ('16:00:00', '17:00:00')
+            ]
+            
+            for timeslot_start, timeslot_end in time_slots:
+                row_data = {
+                    'start_time': timeslot_start,
+                    'end_time': timeslot_end,
+                    'days': {}
+                }
+                for day in days_order:
+                    classes = grouped_timetable.get(day, {}).get(timeslot_start, [])
+                    row_data['days'][day] = classes
+                all_timetable_entries.append(row_data)
+
+        # Fetch list of all faculty members for substitute requests
         cursor.execute("SELECT user_id AS faculty_id, name AS faculty_name FROM users WHERE role = 'faculty' AND user_id != %s ORDER BY name", (faculty_id,))
         faculty_list = cursor.fetchall()
-        
+
     except Error as e:
         flash(f"Error fetching dashboard data: {e}", 'error')
-        # Log the error for debugging
         logger.error(f"Error in faculty_dashboard route: {e}", exc_info=True)
+        # On error, ensure we still return a response
+        return render_template('dashboard.html', notifications=[], substitute_requests=[], lecture_completion=[], faculty_timetable=[], faculty_list=[], current_user_name=session['user_name'])
     finally:
         if cursor:
             cursor.close()
@@ -1734,7 +1800,7 @@ def faculty_dashboard():
                            notifications=notifications,
                            substitute_requests=substitute_requests,
                            lecture_completion=lecture_completion,
-                           faculty_timetable=all_timetable_entries,
+                           faculty_timetable=all_timetable_entries, # Pass the new grouped data
                            faculty_list=faculty_list)
 
 @app.route('/api/faculty/list')
@@ -1755,18 +1821,39 @@ def get_faculty_list():
 @login_required('faculty')
 def cancel_class():
     data = request.json
-    timetable_entry_id = data.get('timetable_entry_id'); reason = data.get('reason')
+    timetable_entry_id = data.get('timetable_entry_id')
+    reason = data.get('reason')
+    
     conn = get_db_connection()
-    if conn is None: return jsonify({'error': 'Database connection failed!'}), 500
-    cursor = conn.cursor()
+    if conn is None:
+        return jsonify({'error': 'Database connection failed!'}), 500
+    
+    cursor = conn.cursor(dictionary=True)
+    
     try:
+        # Check ownership of the class
         cursor.execute("SELECT entry_id FROM timetable WHERE entry_id = %s AND faculty_id = %s", (timetable_entry_id, session['user_id']))
-        if not cursor.fetchone(): return jsonify({'error': 'Unauthorized to cancel this class.'}), 403
+        if not cursor.fetchone():
+            return jsonify({'error': 'Unauthorized to cancel this class.'}), 403
+
+        # Insert into cancellations
         cursor.execute("INSERT INTO cancellations (timetable_id, reason, canceled_by) VALUES (%s, %s, %s)", (timetable_entry_id, reason, session['user_id']))
+        cancellation_id = cursor.lastrowid
+        
+        # Update timetable status
         cursor.execute("UPDATE timetable SET is_cancelled = 1, modified_at = NOW() WHERE entry_id = %s", (timetable_entry_id,))
-        conn.commit(); return jsonify({'message': 'Class canceled successfully.'}), 200
-    except Error as e: conn.rollback(); return jsonify({'error': str(e)}), 500
-    finally: cursor.close(); conn.close()
+        
+        conn.commit()
+        
+        return jsonify({'message': 'Class canceled successfully.', 'cancellation_id': cancellation_id}), 200
+        
+    except Error as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
 
 @app.route('/api/faculty/current/update_lecture_status', methods=['POST'])
 @login_required('faculty')
@@ -1791,33 +1878,350 @@ def update_lecture_status():
     except Error as e: conn.rollback(); return jsonify({'error': str(e)}), 500
     finally: cursor.close(); conn.close()
 
+
+# NEW: API to get qualified and available faculty for a reschedule
+@app.route('/api/faculty/reschedule_options/<int:entry_id>', methods=['GET'])
+@login_required('faculty')
+def get_reschedule_options(entry_id):
+    conn = get_db_connection()
+    if conn is None:
+        return jsonify({'error': 'Database connection failed!'}), 500
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute("""
+            SELECT
+                t.day_of_week, ts.start_time, ts.end_time, s.subject_id, t.section_id, t.timeslot_id
+            FROM timetable t
+            JOIN timeslots ts ON t.timeslot_id = ts.timeslot_id
+            JOIN batch_subjects bs ON t.batch_subject_id = bs.batch_subject_id
+            JOIN subjects s ON bs.subject_id = s.subject_id
+            WHERE t.entry_id = %s
+        """, (entry_id,))
+        class_info = cursor.fetchone()
+
+        if not class_info:
+            return jsonify({'error': 'Class entry not found.'}), 404
+
+        # Find faculty members who teach this subject and are available at this time
+        # NOTE: This logic assumes a simple availability check. More complex rules may be needed.
+        cursor.execute("""
+            SELECT
+                u.user_id, u.name
+            FROM users u
+            JOIN faculty_subjects fs ON u.user_id = fs.faculty_id
+            JOIN batch_subjects bs ON fs.batch_subject_id = bs.batch_subject_id
+            WHERE
+                u.role = 'faculty'
+                AND bs.subject_id = %s
+                AND fs.section_id = %s
+                AND u.user_id != %s
+                AND u.user_id NOT IN (
+                    SELECT faculty_id FROM timetable
+                    WHERE day_of_week = %s AND timeslot_id = %s
+                )
+            ORDER BY u.name
+        """, (class_info['subject_id'], class_info['section_id'], session['user_id'], class_info['day_of_week'], class_info['timeslot_id']))
+
+        available_faculty = cursor.fetchall()
+        return jsonify(available_faculty), 200
+    except Error as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.route('/api/faculty/current/reschedule_class', methods=['POST'])
+@login_required('faculty')
+def reschedule_class():
+    data = request.json
+    cancellation_id = data.get('cancellation_id')
+    new_faculty_id = data.get('new_faculty_id')
+    
+    conn = get_db_connection()
+    if conn is None:
+        return jsonify({'error': 'Database connection failed!'}), 500
+    
+    cursor = conn.cursor(dictionary=True)
+    try:
+        # Get timetable entry ID from cancellation ID
+        cursor.execute("SELECT timetable_id FROM cancellations WHERE cancellation_id = %s", (cancellation_id,))
+        cancellation_info = cursor.fetchone()
+        if not cancellation_info:
+            return jsonify({'error': 'Cancellation record not found.'}), 404
+        
+        timetable_id = cancellation_info['timetable_id']
+
+        # Update the timetable entry with the new faculty and status
+        cursor.execute("UPDATE timetable SET faculty_id = %s, is_rescheduled = 1, is_cancelled = 0, modified_at = NOW() WHERE entry_id = %s", (new_faculty_id, timetable_id))
+        
+        # Notify the new faculty
+        original_faculty_name = session['user_name']
+        new_faculty_name_cursor = conn.cursor(dictionary=True)
+        new_faculty_name_cursor.execute("SELECT name FROM users WHERE user_id = %s", (new_faculty_id,))
+        new_faculty_name = new_faculty_name_cursor.fetchone()['name']
+        new_faculty_name_cursor.close()
+
+        # Get class details for notification message
+        cursor.execute("""
+            SELECT s.name AS subject, sec.name AS section, t.day_of_week, ts.start_time
+            FROM timetable t
+            JOIN batch_subjects bs ON t.batch_subject_id = bs.batch_subject_id
+            JOIN subjects s ON bs.subject_id = s.subject_id
+            JOIN sections sec ON t.section_id = sec.section_id
+            JOIN timeslots ts ON t.timeslot_id = ts.timeslot_id
+            WHERE t.entry_id = %s
+        """, (timetable_id,))
+        class_details = cursor.fetchone()
+        
+        message = f"Your class {class_details['subject']} for {class_details['section']} on {class_details['day_of_week']} at {class_details['start_time']} has been rescheduled to you by {original_faculty_name}."
+        
+        cursor.execute("INSERT INTO notifications (user_id, message, type) VALUES (%s, %s, 'reschedule')", (new_faculty_id, message))
+        
+        conn.commit()
+        return jsonify({'message': f"Class rescheduled to {new_faculty_name} successfully."}), 200
+        
+    except Error as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+# NEW: API to handle swap requests
+@app.route('/api/faculty/current/request_swap', methods=['POST'])
+@login_required('faculty')
+def request_swap():
+    data = request.json
+    original_entry_id = data.get('original_entry_id')
+    swapped_entry_id = data.get('swapped_entry_id')
+    
+    conn = get_db_connection()
+    if conn is None:
+        return jsonify({'error': 'Database connection failed!'}), 500
+    
+    cursor = conn.cursor(dictionary=True)
+    try:
+        # Validate that both classes are owned by the current user and the other faculty member
+        cursor.execute("""
+            SELECT entry_id, faculty_id FROM timetable WHERE entry_id IN (%s, %s)
+        """, (original_entry_id, swapped_entry_id))
+        entries = cursor.fetchall()
+
+        if len(entries) != 2:
+            return jsonify({'error': 'One or both timetable entries not found.'}), 404
+
+        original_entry = next((e for e in entries if e['entry_id'] == original_entry_id), None)
+        swapped_entry = next((e for e in entries if e['entry_id'] == swapped_entry_id), None)
+        
+        if original_entry['faculty_id'] != session['user_id']:
+             return jsonify({'error': 'You are not authorized to swap this class.'}), 403
+        
+        # Create the swap request
+        cursor.execute("""
+            INSERT INTO swap_requests (original_class_id, swapped_class_id, requested_by)
+            VALUES (%s, %s, %s)
+        """, (original_entry_id, swapped_entry_id, session['user_id']))
+
+        # Notify the other faculty member
+        other_faculty_id = swapped_entry['faculty_id']
+        message = f"A class swap request has been initiated by {session['user_name']}."
+        cursor.execute("INSERT INTO notifications (user_id, message, type) VALUES (%s, %s, 'swap_request')", (other_faculty_id, message))
+
+        conn.commit()
+        return jsonify({'message': 'Swap request sent successfully.'}), 200
+
+    except Error as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+# NEW: API to respond to swap requests
+@app.route('/api/faculty/current/respond_swap/<int:request_id>', methods=['POST'])
+@login_required('faculty')
+def respond_to_swap(request_id):
+    data = request.json
+    status = data.get('status')
+    
+    if status not in ['accepted', 'rejected']:
+        return jsonify({'error': 'Invalid status provided.'}), 400
+
+    conn = get_db_connection()
+    if conn is None:
+        return jsonify({'error': 'Database connection failed!'}), 500
+    
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute("""
+            SELECT * FROM swap_requests WHERE request_id = %s AND requested_to = %s
+        """, (request_id, session['user_id']))
+        request_details = cursor.fetchone()
+
+        if not request_details:
+            return jsonify({'error': 'Swap request not found or unauthorized.'}), 404
+
+        if status == 'accepted':
+            original_class_id = request_details['original_class_id']
+            swapped_class_id = request_details['swapped_class_id']
+
+            # Get faculty IDs
+            cursor.execute("SELECT faculty_id FROM timetable WHERE entry_id = %s", (original_class_id,))
+            original_faculty_id = cursor.fetchone()['faculty_id']
+            cursor.execute("SELECT faculty_id FROM timetable WHERE entry_id = %s", (swapped_class_id,))
+            swapped_faculty_id = cursor.fetchone()['faculty_id']
+
+            # Perform the swap
+            cursor.execute("UPDATE timetable SET faculty_id = %s WHERE entry_id = %s", (swapped_faculty_id, original_class_id))
+            cursor.execute("UPDATE timetable SET faculty_id = %s WHERE entry_id = %s", (original_faculty_id, swapped_class_id))
+            cursor.execute("UPDATE swap_requests SET status = 'accepted', responded_at = NOW() WHERE request_id = %s", (request_id,))
+
+            # Notify both faculty members
+            message_to_requester = f"Your swap request has been accepted by {session['user_name']}."
+            cursor.execute("INSERT INTO notifications (user_id, message, type) VALUES (%s, %s, 'swap_accepted')", (original_faculty_id, message_to_requester))
+            message_to_respondent = f"You have accepted a swap request from {session['user_name']}."
+            cursor.execute("INSERT INTO notifications (user_id, message, type) VALUES (%s, %s, 'swap_accepted')", (swapped_faculty_id, message_to_respondent))
+
+        elif status == 'rejected':
+            cursor.execute("UPDATE swap_requests SET status = 'rejected', responded_at = NOW() WHERE request_id = %s", (request_id,))
+            original_faculty_id = request_details['requested_by']
+            message = f"Your swap request has been rejected by {session['user_name']}."
+            cursor.execute("INSERT INTO notifications (user_id, message, type) VALUES (%s, %s, 'swap_rejected')", (original_faculty_id, message))
+
+        conn.commit()
+        return jsonify({'message': f"Swap request {status} successfully."}), 200
+
+    except Error as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
+# In app.py, add this new route:
+@app.route('/api/faculty/get_swap_options/<int:entry_id>')
+@login_required('faculty')
+def get_swap_options(entry_id):
+    conn = get_db_connection()
+    if conn is None:
+        return jsonify({'error': 'Database connection failed!'}), 500
+    cursor = conn.cursor(dictionary=True)
+    try:
+        # Get details of the class being swapped
+        cursor.execute("""
+            SELECT t.section_id, t.batch_subject_id, t.timeslot_id, t.day_of_week, t.faculty_id
+            FROM timetable t
+            WHERE t.entry_id = %s AND t.faculty_id = %s
+        """, (entry_id, session['user_id']))
+        original_class = cursor.fetchone()
+
+        if not original_class:
+            return jsonify({'error': 'Original class not found or unauthorized.'}), 404
+        
+        # Find classes for the same subject and section, but taught by a different faculty
+        cursor.execute("""
+            SELECT
+                t.entry_id,
+                t.day_of_week,
+                ts.start_time,
+                s.name AS subject_name,
+                sec.name AS section_name,
+                u.name AS faculty_name
+            FROM timetable t
+            JOIN sections sec ON t.section_id = sec.section_id
+            JOIN batch_subjects bs ON t.batch_subject_id = bs.batch_subject_id
+            JOIN subjects s ON bs.subject_id = s.subject_id
+            JOIN timeslots ts ON t.timeslot_id = ts.timeslot_id
+            JOIN users u ON t.faculty_id = u.user_id
+            WHERE
+                t.section_id = %s
+                AND t.batch_subject_id = %s
+                AND t.faculty_id != %s
+            ORDER BY u.name, t.day_of_week, ts.start_time
+        """, (original_class['section_id'], original_class['batch_subject_id'], session['user_id']))
+        
+        swap_options = cursor.fetchall()
+
+        return jsonify(swap_options), 200
+
+    except Error as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+
+# In app.py
 @app.route('/api/faculty/current/request_substitute', methods=['POST'])
 @login_required('faculty')
 def request_substitute():
     data = request.json
-    timetable_entry_id = data.get('timetable_entry_id'); requested_to_faculty_id = data.get('requested_to_faculty_id'); reason = data.get('reason')
+    timetable_entry_id = data.get('timetable_entry_id')
+    requested_to_faculty_id = data.get('requested_to_faculty_id')
+    reason = data.get('reason')
+    
+    # Input validation
+    if not all([timetable_entry_id, requested_to_faculty_id, reason]):
+        return jsonify({'error': 'Missing required data: timetable_entry_id, requested_to_faculty_id, or reason.'}), 400
+
     conn = get_db_connection()
-    if conn is None: return jsonify({'error': 'Database connection failed!'}), 500
-    cursor = conn.cursor()
+    if conn is None:
+        return jsonify({'error': 'Database connection failed!'}), 500
+    cursor = conn.cursor(dictionary=True)
+    
     try:
+        # Check if the current user is the faculty for this class
         cursor.execute("SELECT faculty_id FROM timetable WHERE entry_id = %s", (timetable_entry_id,))
         class_faculty_id = cursor.fetchone()
-        if class_faculty_id is None or class_faculty_id[0] != session['user_id']: return jsonify({'error': 'You are not authorized to request a substitute for this class.'}), 403
+        if class_faculty_id is None or class_faculty_id['faculty_id'] != session['user_id']:
+            return jsonify({'error': 'You are not authorized to request a substitute for this class.'}), 403
+
+        # Check if a cancellation record already exists, if not, create one
         cursor.execute("SELECT cancellation_id FROM cancellations WHERE timetable_id = %s AND canceled_by = %s", (timetable_entry_id, session['user_id']))
         cancellation = cursor.fetchone()
+        
         if not cancellation:
+            # First, update the timetable entry to show it's cancelled
+            cursor.execute("UPDATE timetable SET is_cancelled = 1, modified_at = NOW() WHERE entry_id = %s", (timetable_entry_id,))
+            
+            # Then, create the cancellation record
             cursor.execute("INSERT INTO cancellations (timetable_id, reason, canceled_by) VALUES (%s, %s, %s)", (timetable_entry_id, reason, session['user_id']))
-            conn.commit()
             cancellation_id = cursor.lastrowid
-        else: cancellation_id = cancellation[0]
+        else:
+            cancellation_id = cancellation['cancellation_id']
+
+        # Check for existing pending requests to prevent duplicates
         cursor.execute("SELECT request_id FROM substitute_requests WHERE cancellation_id = %s AND requested_to = %s AND status = 'pending'", (cancellation_id, requested_to_faculty_id))
-        if cursor.fetchone(): return jsonify({'error': 'A pending request to this faculty member already exists.'}), 409
+        if cursor.fetchone():
+            return jsonify({'error': 'A pending request to this faculty member already exists.'}), 409
+
+        # Insert the new substitute request
         cursor.execute("INSERT INTO substitute_requests (cancellation_id, requested_to, status) VALUES (%s, %s, 'pending')", (cancellation_id, requested_to_faculty_id))
-        notification_message = f"Substitute request from {session['user_name']} for a class on {datetime.date.today()}. Reason: {reason}"
-        cursor.execute("INSERT INTO notifications (user_id, type, message) VALUES (%s, 'substitute_request', %s)", (requested_to_faculty_id, notification_message))
-        conn.commit(); return jsonify({'message': 'Substitute request sent successfully.'}), 200
-    except Error as e: conn.rollback(); return jsonify({'error': str(e)}), 500
-    finally: cursor.close(); conn.close()
+        
+        # Create a notification for the requested faculty
+        cursor.execute("""
+            SELECT s.name AS subject_name, sec.name AS section_name
+            FROM timetable t
+            JOIN batch_subjects bs ON t.batch_subject_id = bs.batch_subject_id
+            JOIN subjects s ON bs.subject_id = s.subject_id
+            JOIN sections sec ON t.section_id = sec.section_id
+            WHERE t.entry_id = %s
+        """, (timetable_entry_id,))
+        class_details = cursor.fetchone()
+        
+        if class_details:
+            notification_message = f"Substitute request from {session['user_name']} for {class_details['subject_name']} ({class_details['section_name']}). Reason: {reason}"
+            cursor.execute("INSERT INTO notifications (user_id, type, message) VALUES (%s, 'substitute_request', %s)", (requested_to_faculty_id, notification_message))
+
+        conn.commit()
+        return jsonify({'message': 'Substitute request sent successfully.'}), 200
+        
+    except Error as e:
+        conn.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
 
 @app.route('/api/faculty/current/respond_substitute/<int:request_id>', methods=['POST'])
 @login_required('faculty')
@@ -1907,6 +2311,46 @@ def get_faculty():
         print(f"Error fetching faculty list: {e}"); return jsonify([])
     finally: cursor.close(); conn.close()
 
+# NEW API endpoint to fetch sections based on year and semester for HOD dashboard
+@app.route('/api/hod/options/sections')
+@login_required('hod')
+def get_sections_for_hod():
+    conn = get_db_connection()
+    if conn is None:
+        return jsonify([])
+    cursor = conn.cursor(dictionary=True)
+    try:
+        user_id = session['user_id']
+        year = request.args.get('year')
+        semester = request.args.get('semester')
+
+        cursor.execute("SELECT department_id FROM users WHERE user_id = %s", (user_id,))
+        hod_department_id_row = cursor.fetchone()
+        if not hod_department_id_row:
+            return jsonify([])
+        hod_department_id = hod_department_id_row['department_id']
+
+        if not year or not semester:
+            return jsonify([])
+        
+        query = """
+            SELECT DISTINCT sec.section_id, sec.name as section_name
+            FROM sections sec
+            JOIN batches b ON sec.batch_id = b.batch_id
+            JOIN batch_departments bd ON b.batch_id = bd.batch_id
+            WHERE bd.department_id = %s AND b.year = %s AND b.semester = %s
+            ORDER BY sec.name
+        """
+        cursor.execute(query, (hod_department_id, year, semester))
+        sections = cursor.fetchall()
+        return jsonify(sections)
+    except Error as e:
+        print(f"Error fetching sections for HOD: {e}");
+        return jsonify([])
+    finally:
+        cursor.close();
+        conn.close()
+
 @app.route('/api/hod/department/progress')
 @login_required('hod')
 def get_department_progress():
@@ -1942,6 +2386,66 @@ def get_department_progress():
         print(f"Error fetching HOD progress data: {e}"); return jsonify([])
     finally: cursor.close(); conn.close()
 
+@app.route('/api/hod/department/progress_filtered')
+@login_required('hod')
+def get_department_progress_filtered():
+    conn = get_db_connection()
+    if conn is None:
+        return jsonify([])
+    cursor = conn.cursor(dictionary=True)
+    try:
+        user_id = session['user_id']
+        year = request.args.get('year')
+        semester = request.args.get('semester')
+        faculty_id = request.args.get('faculty_id')
+        section_id = request.args.get('section_id') # New section filter
+        
+        cursor.execute("SELECT department_id FROM users WHERE user_id = %s", (user_id,))
+        hod_department_id_row = cursor.fetchone()
+        if not hod_department_id_row:
+            return jsonify([])
+        hod_department_id = hod_department_id_row['department_id']
+        
+        query = """
+            SELECT s.name AS subject_name, sp.planned_sessions, sp.completed_sessions, 
+                   sec.name AS section_name, b.semester, u.name as faculty_name
+            FROM subject_progress sp 
+            JOIN sections sec ON sp.section_id = sec.section_id
+            JOIN batches b ON sec.batch_id = b.batch_id 
+            JOIN batch_departments bd ON b.batch_id = bd.batch_id
+            JOIN batch_subjects bs ON sp.batch_subject_id = bs.batch_subject_id 
+            JOIN subjects s ON bs.subject_id = s.subject_id
+            JOIN users u ON sp.faculty_id = u.user_id
+            WHERE bd.department_id = %s
+        """
+        params = [hod_department_id]
+        if year:
+            query += " AND b.year = %s"
+            params.append(year)
+        if semester:
+            query += " AND b.semester = %s"
+            params.append(semester)
+        if faculty_id:
+            query += " AND sp.faculty_id = %s"
+            params.append(faculty_id)
+        if section_id: # New condition for section filter
+            query += " AND sp.section_id = %s"
+            params.append(section_id)
+
+        query += " GROUP BY sp.batch_subject_id"
+        
+        cursor.execute(query, tuple(params))
+        progress_data = cursor.fetchall()
+        for item in progress_data:
+            item['completion_percentage'] = (item['completed_sessions'] / item['planned_sessions'] * 100) if item['planned_sessions'] > 0 else 0
+        return jsonify(progress_data)
+    except Error as e:
+        print(f"Error fetching HOD progress data with filters: {e}");
+        return jsonify([])
+    finally:
+        cursor.close()
+        conn.close()
+
 @app.route('/api/hod/department/lagging_subjects')
 @login_required('hod')
 def get_lagging_subjects():
@@ -1969,6 +2473,64 @@ def get_lagging_subjects():
     except Error as e:
         print(f"Error fetching lagging subjects: {e}"); return jsonify([])
     finally: cursor.close(); conn.close()
+    
+@app.route('/api/hod/department/lagging_subjects_filtered')
+@login_required('hod')
+def get_lagging_subjects_filtered():
+    conn = get_db_connection()
+    if conn is None:
+        return jsonify([])
+    cursor = conn.cursor(dictionary=True)
+    try:
+        user_id = session['user_id']
+        year = request.args.get('year')
+        semester = request.args.get('semester')
+        faculty_id = request.args.get('faculty_id')
+        section_id = request.args.get('section_id') # New section filter
+
+        cursor.execute("SELECT department_id FROM users WHERE user_id = %s", (user_id,))
+        hod_department_id_row = cursor.fetchone()
+        if not hod_department_id_row:
+            return jsonify([])
+        hod_department_id = hod_department_id_row['department_id']
+        
+        query = """
+            SELECT s.name AS subject_name, sec.name AS section_name, sp.planned_sessions AS total_sessions, sp.completed_sessions
+            FROM subject_progress sp 
+            JOIN sections sec ON sp.section_id = sec.section_id
+            JOIN batches b ON sec.batch_id = b.batch_id
+            JOIN batch_departments bd ON b.batch_id = bd.batch_id 
+            JOIN batch_subjects bs ON sp.batch_subject_id = bs.batch_subject_id
+            JOIN subjects s ON bs.subject_id = s.subject_id
+            WHERE bd.department_id = %s AND (sp.completed_sessions / sp.planned_sessions) * 100 < 50
+        """
+        params = [hod_department_id]
+        if year:
+            query += " AND b.year = %s"
+            params.append(year)
+        if semester:
+            query += " AND b.semester = %s"
+            params.append(semester)
+        if faculty_id:
+            query += " AND sp.faculty_id = %s"
+            params.append(faculty_id)
+        if section_id: # New condition for section filter
+            query += " AND sp.section_id = %s"
+            params.append(section_id)
+
+        query += " ORDER BY (sp.completed_sessions / sp.planned_sessions) ASC"
+        
+        cursor.execute(query, tuple(params))
+        lagging_subjects = cursor.fetchall()
+        for subject in lagging_subjects:
+            subject['completion_percentage'] = (subject['completed_sessions'] / subject['total_sessions'] * 100) if subject['total_sessions'] > 0 else 0
+        return jsonify(lagging_subjects)
+    except Error as e:
+        print(f"Error fetching lagging subjects with filters: {e}");
+        return jsonify([])
+    finally:
+        cursor.close()
+        conn.close()
 
 @app.route('/api/hod/department/timetable')
 @login_required('hod')
@@ -1978,14 +2540,16 @@ def get_department_timetable():
     cursor = conn.cursor(dictionary=True)
     try:
         year = request.args.get('year'); semester = request.args.get('semester'); faculty_id = request.args.get('faculty_id')
+        section_id = request.args.get('section_id') # New section filter
         user_id = session['user_id']
         cursor.execute("SELECT department_id FROM users WHERE user_id = %s", (user_id,))
         hod_department_id_row = cursor.fetchone()
         if not hod_department_id_row: return jsonify([])
         hod_department_id = hod_department_id_row['department_id']
+        # MODIFIED: Added t.is_completed to the SELECT clause
         query = """
             SELECT t.entry_id, t.date AS entry_date, t.day_of_week, ts.start_time, ts.end_time, s.name AS subject_name,
-            u.name AS faculty_name, sec.name AS section_name, r.room_number AS classroom_name, t.is_cancelled
+            u.name AS faculty_name, sec.name AS section_name, r.room_number AS classroom_name, t.is_cancelled, t.is_completed
             FROM timetable t JOIN batch_subjects bs ON t.batch_subject_id = bs.batch_subject_id JOIN subjects s ON bs.subject_id = s.subject_id
             JOIN users u ON t.faculty_id = u.user_id JOIN sections sec ON t.section_id = sec.section_id
             JOIN batches b ON sec.batch_id = b.batch_id JOIN batch_departments bd ON b.batch_id = bd.batch_id
@@ -1995,12 +2559,21 @@ def get_department_timetable():
         if year: query += " AND b.year = %s"; params.append(year)
         if semester: query += " AND b.semester = %s"; params.append(semester)
         if faculty_id: query += " AND t.faculty_id = %s"; params.append(faculty_id)
+        if section_id: query += " AND sec.section_id = %s"; params.append(section_id) # New condition
         query += " ORDER BY t.date, ts.start_time"
         cursor.execute(query, tuple(params))
         timetable_data = cursor.fetchall()
         for entry in timetable_data:
             entry['start_time'] = str(entry['start_time']); entry['end_time'] = str(entry['end_time'])
-            entry['entry_date'] = str(entry['entry_date']); entry['type'] = 'cancelled' if entry['is_cancelled'] else 'scheduled'
+            entry['entry_date'] = str(entry['entry_date'])
+            # MODIFIED: Logic to set the 'type' based on completion status first
+            if entry['is_completed']:
+                entry['type'] = 'completed'
+            elif entry['is_cancelled']:
+                entry['type'] = 'cancelled'
+            else:
+                entry['type'] = 'scheduled'
+                
             if entry['is_cancelled']:
                 cancel_cursor = conn.cursor(dictionary=True)
                 cancel_cursor.execute("SELECT reason FROM cancellations WHERE timetable_id = %s", (entry['entry_id'],))
@@ -2050,21 +2623,41 @@ def download_progress_csv():
     if conn is None: return Response("Database connection failed", status=500)
     cursor = conn.cursor(dictionary=True)
     try:
+        year = request.args.get('year')
+        semester = request.args.get('semester')
+        faculty_id = request.args.get('faculty_id')
+        section_id = request.args.get('section_id')
         user_id = session['user_id']
         cursor.execute("SELECT department_id FROM users WHERE user_id = %s", (user_id,))
         hod_department_id_row = cursor.fetchone()
         if not hod_department_id_row: return Response("HOD department not found", status=404)
         hod_department_id = hod_department_id_row['department_id']
-        cursor.execute("""
+
+        query = """
             SELECT s.name AS subject_name, sec.name AS section_name, b.semester, sp.planned_sessions, sp.completed_sessions
-            FROM subject_progress sp JOIN sections sec ON sp.section_id = sec.section_id
-            JOIN batches b ON sec.batch_id = b.batch_id JOIN batch_departments bd ON b.batch_id = bd.batch_id
-            JOIN batch_subjects bs ON sp.batch_subject_id = bs.batch_subject_id JOIN subjects s ON bs.subject_id = s.subject_id
-            WHERE bd.department_id = %s ORDER BY s.name, sec.name
-        """, (hod_department_id,))
+            FROM subject_progress sp 
+            JOIN sections sec ON sp.section_id = sec.section_id
+            JOIN batches b ON sec.batch_id = b.batch_id 
+            JOIN batch_departments bd ON b.batch_id = bd.batch_id
+            JOIN batch_subjects bs ON sp.batch_subject_id = bs.batch_subject_id 
+            JOIN subjects s ON bs.subject_id = s.subject_id
+            WHERE bd.department_id = %s 
+        """
+        params = [hod_department_id]
+        if year: query += " AND b.year = %s"; params.append(year)
+        if semester: query += " AND b.semester = %s"; params.append(semester)
+        if faculty_id: query += " AND sp.faculty_id = %s"; params.append(faculty_id)
+        if section_id: query += " AND sp.section_id = %s"; params.append(section_id)
+        
+        query += " ORDER BY s.name, sec.name"
+
+        cursor.execute(query, tuple(params))
         data = cursor.fetchall()
+        for item in data:
+            item['completion_percentage'] = (item['completed_sessions'] / item['planned_sessions'] * 100) if item['planned_sessions'] > 0 else 0
+        
         if not data: return Response("No data to generate report.", status=404)
-        output = io.StringIO(); fieldnames = ['subject_name', 'section_name', 'semester', 'planned_sessions', 'completed_sessions']
+        output = io.StringIO(); fieldnames = ['subject_name', 'section_name', 'semester', 'planned_sessions', 'completed_sessions', 'completion_percentage']
         writer = csv.DictWriter(output, fieldnames=fieldnames)
         writer.writeheader(); writer.writerows(data)
         return Response(output.getvalue(), mimetype="text/csv", headers={"Content-disposition": "attachment; filename=department_progress_report.csv"})
@@ -2079,6 +2672,10 @@ def download_timetable_csv():
     if conn is None: return Response("Database connection failed", status=500)
     cursor = conn.cursor(dictionary=True)
     try:
+        year = request.args.get('year')
+        semester = request.args.get('semester')
+        faculty_id = request.args.get('faculty_id')
+        section_id = request.args.get('section_id')
         user_id = session['user_id']
         cursor.execute("SELECT department_id FROM users WHERE user_id = %s", (user_id,))
         hod_department_id_row = cursor.fetchone()
@@ -2086,7 +2683,7 @@ def download_timetable_csv():
         hod_department_id = hod_department_id_row['department_id']
         cursor.execute("""
             SELECT t.date, t.day_of_week, ts.start_time, ts.end_time, s.name AS subject_name, u.name AS faculty_name,
-            sec.name AS section_name, r.room_number AS classroom_name, t.is_cancelled
+            sec.name AS section_name, r.room_number AS classroom_name, t.is_cancelled, t.is_completed
             FROM timetable t JOIN batch_subjects bs ON t.batch_subject_id = bs.batch_subject_id
             JOIN subjects s ON bs.subject_id = s.subject_id JOIN users u ON t.faculty_id = u.user_id
             JOIN sections sec ON t.section_id = sec.section_id JOIN batches b ON sec.batch_id = b.batch_id
@@ -2096,7 +2693,13 @@ def download_timetable_csv():
         data = cursor.fetchall()
         for row in data:
             row['start_time'] = str(row['start_time']); row['end_time'] = str(row['end_time']); row['date'] = str(row['date'])
-            row['status'] = 'Cancelled' if row['is_cancelled'] else 'Scheduled'; del row['is_cancelled']
+            if row['is_completed']:
+                row['status'] = 'Completed'
+            elif row['is_cancelled']:
+                row['status'] = 'Cancelled'
+            else:
+                row['status'] = 'Scheduled'
+            del row['is_cancelled']; del row['is_completed']
         if not data: return Response("No data to generate report.", status=404)
         output = io.StringIO(); fieldnames = ['date', 'day_of_week', 'start_time', 'end_time', 'subject_name', 'faculty_name', 'section_name', 'classroom_name', 'status']
         writer = csv.DictWriter(output, fieldnames=fieldnames)
@@ -2114,18 +2717,31 @@ def download_lagging_csv():
     cursor = conn.cursor(dictionary=True)
     try:
         user_id = session['user_id']
+        year = request.args.get('year')
+        semester = request.args.get('semester')
+        faculty_id = request.args.get('faculty_id')
+        section_id = request.args.get('section_id')
         cursor.execute("SELECT department_id FROM users WHERE user_id = %s", (user_id,))
         hod_department_id_row = cursor.fetchone()
         if not hod_department_id_row: return Response("HOD department not found", status=404)
         hod_department_id = hod_department_id_row['department_id']
-        cursor.execute("""
+        
+        query = """
             SELECT s.name AS subject_name, sec.name AS section_name, sp.planned_sessions AS total_sessions, sp.completed_sessions
             FROM subject_progress sp JOIN sections sec ON sp.section_id = sec.section_id
             JOIN batch_departments bd ON sec.batch_id = bd.batch_id JOIN batch_subjects bs ON sp.batch_subject_id = bs.batch_subject_id
-            JOIN subjects s ON bs.subject_id = s.subject_id WHERE bd.department_id = %s
-            AND (sp.completed_sessions / sp.planned_sessions) * 100 < 50
-            ORDER BY (sp.completed_sessions / sp.planned_sessions) ASC
-        """, (hod_department_id,))
+            JOIN subjects s ON bs.subject_id = s.subject_id JOIN batches b ON sec.batch_id = b.batch_id
+            WHERE bd.department_id = %s AND (sp.completed_sessions / sp.planned_sessions) * 100 < 50
+        """
+        params = [hod_department_id]
+        if year: query += " AND b.year = %s"; params.append(year)
+        if semester: query += " AND b.semester = %s"; params.append(semester)
+        if faculty_id: query += " AND sp.faculty_id = %s"; params.append(faculty_id)
+        if section_id: query += " AND sp.section_id = %s"; params.append(section_id)
+        
+        query += " ORDER BY (sp.completed_sessions / sp.planned_sessions) ASC"
+        
+        cursor.execute(query, tuple(params))
         data = cursor.fetchall()
         for row in data:
             row['completion_percentage'] = f"{round((row['completed_sessions'] / row['total_sessions']) * 100, 2) if row['total_sessions'] > 0 else 0}%"
