@@ -3465,6 +3465,7 @@ def get_select_options(fk_column_name, fk_table_name):
             'rooms': {'id_col': 'room_id', 'name_col': 'room_number'},
             'subjects': {'id_col': 'subject_id', 'name_col': 'CONCAT(subject_code, " - ", name)'},
             # Add other tables as needed
+            
         }
 
         mapping = display_mappings.get(fk_table_name)
