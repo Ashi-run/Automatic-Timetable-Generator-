@@ -137,6 +137,102 @@
             text-decoration: none;
             cursor: pointer;
         }
+
+        /* Styles for the Timetable Grid - Adjusted for exact image match */
+        .timetable-grid {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+            font-family: Arial, sans-serif; /* Closer to excel font */
+        }
+        .timetable-grid th, .timetable-grid td {
+            border: 1px solid #000; /* Darker borders like excel */
+            padding: 4px 8px; /* Reduced padding */
+            text-align: center;
+            vertical-align: top; /* Align content to top */
+            font-size: 0.9em; /* Smaller font */
+        }
+        .timetable-grid th {
+            background-color: #f2f2f2; /* Light grey header */
+            font-weight: bold;
+        }
+        /* No alternating row colors for closer excel match */
+        .timetable-grid tr:nth-child(odd),
+        .timetable-grid tr:nth-child(even) {
+            background-color: #ffffff; /* All white background for rows */
+        }
+
+        /* Specific header styling for the name */
+        .timetable-grid .professor-name-header {
+            background-color: #f2f2f2; /* Same as other headers */
+            font-weight: bold;
+            font-size: 1em;
+            padding: 8px;
+        }
+
+        .timetable-grid .time-period-header {
+            background-color: #f2f2f2;
+            font-weight: bold;
+        }
+        .timetable-grid .from-to-header {
+            width: 60px; /* Adjust width as per image */
+            font-weight: bold;
+            font-size: 0.8em; /* Smaller for From/To */
+            padding: 2px 5px;
+        }
+        .timetable-grid .day-header {
+            width: 12%; /* Distribute day columns */
+            font-weight: bold;
+            font-size: 0.9em;
+        }
+        .timetable-grid .time-slot-cell {
+            width: 60px; /* Match From/To width */
+            font-weight: normal; /* As in excel, not bold by default */
+            font-size: 0.9em;
+            padding: 2px 5px;
+        }
+        .lunch-break {
+            background-color: #ffeb3b; /* Yellow background for lunch */
+            font-weight: bold;
+            text-align: center;
+            vertical-align: middle;
+            font-size: 0.9em;
+            padding: 8px;
+        }
+        .class-info {
+            padding: 5px 0;
+            margin-bottom: 0; /* Remove margin-bottom */
+            border-bottom: 1px solid #eee; /* Separator line */
+            line-height: 1.2;
+            font-size: 0.8em; /* Smaller font for class info */
+        }
+        .class-info:last-child {
+            border-bottom: none;
+        }
+        .status-cancelled {
+            color: red;
+            font-weight: bold;
+            font-size: 0.7em;
+        }
+        .status-completed {
+            color: green;
+            font-weight: bold;
+            font-size: 0.7em;
+        }
+        .actions-cell button {
+            display: block; /* Stack buttons */
+            margin: 2px auto; /* Center and space buttons */
+            font-size: 0.7em; /* Smaller button text */
+            padding: 1px 4px; /* Smaller padding for buttons */
+            width: 90%; /* Make buttons take more width */
+        }
+        .no-class-cell {
+            background-color: #fcfcfc; /* Very light grey for empty cells */
+            min-height: 40px; /* Ensure cells have some height even if empty */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
     </style>
 </head>
 <body class="flex flex-col min-h-screen">
@@ -151,9 +247,11 @@
                 <img src="https://placehold.co/40x40/cccccc/000000?text=F" alt="Profile" class="rounded-full border-2 border-white">
                 <span class="font-medium" id="current-faculty-name">{{ current_user_name }}</span>
             </div>
-            <button id="logout-button" class="bg-red-700 hover:bg-red-800 text-white font-bold py-2 px-4 rounded-full shadow-md transition-colors duration-200">
-                Logout
-            </button>
+            <form id="logout-form" action="{{ url_for('logout') }}" method="post" style="display: inline;">
+                <button type="submit" class="bg-red-700 hover:bg-red-800 text-white font-bold py-2 px-4 rounded-full shadow-md transition-colors duration-200">
+                    Logout
+                </button>
+            </form>
         </div>
     </header>
 
@@ -228,55 +326,76 @@
             </div>
 
             <div class="bg-white p-6 rounded-xl shadow-md border border-gray-200 mb-8">
-                <h3 class="text-xl font-semibold text-gray-800 mb-4">My Timetable</h3>
+                <h3 class="text-xl font-semibold text-gray-800 mb-4">My Personal Timetable</h3>
                 <div class="table-responsive">
-                    <table class="table table-hover table-striped">
+                    <table class="timetable-grid">
                         <thead>
                             <tr>
-                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
-                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Day</th>
-                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Time</th>
-                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Subject</th>
-                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Section</th>
-                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Room</th>
-                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
-                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                                <th class="professor-name-header" colspan="8">Prof. {{ current_user_name }}</th>
+                            </tr>
+                            <tr>
+                                <th class="time-period-header" colspan="2">Day Time Period</th>
+                                <th class="day-header">Monday</th>
+                                <th class="day-header">Tuesday</th>
+                                <th class="day-header">Wednesday</th>
+                                <th class="day-header">Thursday</th>
+                                <th class="day-header">Friday</th>
+                                <th class="day-header">Saturday</th>
+                            </tr>
+                            <tr>
+                                <th class="from-to-header">From</th>
+                                <th class="from-to-header">To</th>
+                                <th></th> {# Empty cell for Monday #}
+                                <th></th> {# Empty cell for Tuesday #}
+                                <th></th> {# Empty cell for Wednesday #}
+                                <th></th> {# Empty cell for Thursday #}
+                                <th></th> {# Empty cell for Friday #}
+                                <th></th> {# Empty cell for Saturday #}
                             </tr>
                         </thead>
                         <tbody>
-                            {% if faculty_timetable %}
-                                {% for entry in faculty_timetable %}
-                                    <tr id="timetable-entry-{{ entry.entry_id }}">
-                                        <td class="px-4 py-2 whitespace-nowrap">{{ entry.entry_date }}</td>
-                                        <td class="px-4 py-2 whitespace-nowrap">{{ entry.day_of_week }}</td>
-                                        <td class="px-4 py-2 whitespace-nowrap">{{ entry.start_time }} - {{ entry.end_time }}</td>
-                                        <td class="px-4 py-2 whitespace-nowrap">{{ entry.subject_name }}</td>
-                                        <td class="px-4 py-2 whitespace-nowrap">{{ entry.section_name }}</td>
-                                        <td class="px-4 py-2 whitespace-nowrap">{{ entry.room_number if entry.room_number else 'N/A' }}</td>
-                                        <td class="px-4 py-2 whitespace-nowrap capitalize">
-                                            <span class="font-semibold {% if entry.type == 'cancelled' %}text-red-600{% else %}text-green-600{% endif %}">
-                                                {{ entry.type }}
-                                            </span>
-                                            {% if entry.type == 'cancelled' and entry.status_reason %}
-                                                <br><small class="text-gray-500">({{ entry.status_reason }})</small>
-                                            {% endif %}
-                                        </td>
-                                        <td class="px-4 py-2 whitespace-nowrap">
-                                            {% if entry.type == 'scheduled' %}
-                                                <button onclick="openCancelModal({{ entry.entry_id }})" class="bg-red-500 hover:bg-red-600 text-white text-xs font-bold py-1 px-2 rounded-full mb-1">Cancel</button>
-                                                <button onclick="updateLectureStatus({{ entry.entry_id }}, 'completed')" class="bg-green-500 hover:bg-green-600 text-white text-xs font-bold py-1 px-2 rounded-full">Mark Completed</button>
-                                            {% elif entry.type == 'cancelled' %}
-                                                <button onclick="openSubstituteModal({{ entry.entry_id }})" class="bg-blue-500 hover:bg-blue-600 text-white text-xs font-bold py-1 px-2 rounded-full mb-1">Request Substitute</button>
-                                                <button onclick="updateLectureStatus({{ entry.entry_id }}, 'pending')" class="bg-yellow-500 hover:bg-yellow-600 text-white text-xs font-bold py-1 px-2 rounded-full">Mark Pending</button>
-                                            {% endif %}
-                                        </td>
-                                    </tr>
-                                {% endfor %}
-                            {% else %}
+                            {% set days_of_week = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] %}
+                            
+                            {% for row in faculty_timetable %}
                                 <tr>
-                                    <td colspan="8" class="text-center py-4 text-gray-500">No timetable entries found.</td>
+                                    {% if row.start_time == '13:00:00' %}
+                                        <td class="time-slot-cell">{{ row.start_time.split(':')[0] + ':' + row.start_time.split(':')[1] }}</td>
+                                        <td class="time-slot-cell">{{ row.end_time.split(':')[0] + ':' + row.end_time.split(':')[1] }}</td>
+                                        <td colspan="{{ days_of_week|length }}" class="lunch-break">Lunch Break</td>
+                                    {% else %}
+                                        <td class="time-slot-cell">{{ row.start_time.split(':')[0] + ':' + row.start_time.split(':')[1] }}</td>
+                                        <td class="time-slot-cell">{{ row.end_time.split(':')[0] + ':' + row.end_time.split(':')[1] }}</td>
+                                        {% for day in days_of_week %}
+                                            <td class="timetable-cell">
+                                                {% set classes_in_slot = row.days[day] %}
+                                                {% if classes_in_slot %}
+                                                    {% set class_entry = classes_in_slot[0] %}
+                                                    <div class="class-info">
+                                                        {{ class_entry.subject_name }}<br>
+                                                        {{ class_entry.section_name }}<br>
+                                                        {% if class_entry.room_number %}Room: {{ class_entry.room_number }}{% endif %}
+                                                        <div class="actions-cell mt-1">
+                                                            {% if class_entry.type == 'scheduled' %}
+                                                                <button onclick="openCancelModal({{ class_entry.entry_id }})" class="bg-red-500 hover:bg-red-600 text-white text-xs font-bold py-1 px-2 rounded-full mb-1">Cancel</button>
+                                                                <button onclick="updateLectureStatus({{ class_entry.entry_id }}, 'completed')" class="bg-green-500 hover:bg-green-600 text-white text-xs font-bold py-1 px-2 rounded-full">Mark Completed</button>
+                                                                <button onclick="openSwapModal({{ class_entry.entry_id }})" class="bg-blue-500 hover:bg-blue-600 text-white text-xs font-bold py-1 px-2 rounded-full mt-1">Swap Request</button>
+                                                            {% elif class_entry.type == 'cancelled' %}
+                                                                <p class="text-xs text-red-500 font-semibold">Cancelled: {{ class_entry.status_reason }}</p>
+                                                                <button onclick="openSubstituteModal({{ class_entry.entry_id }})" class="bg-blue-500 hover:bg-blue-600 text-white text-xs font-bold py-1 px-2 rounded-full mt-1">Request Substitute</button>
+                                                                <button onclick="updateLectureStatus({{ class_entry.entry_id }}, 'scheduled')" class="bg-yellow-500 hover:bg-yellow-600 text-white text-xs font-bold py-1 px-2 rounded-full mt-1">Mark Scheduled</button>
+                                                            {% elif class_entry.type == 'completed' %}
+                                                                <p class="text-xs text-green-500 font-semibold">Lecture Completed</p>
+                                                            {% endif %}
+                                                        </div>
+                                                    </div>
+                                                {% else %}
+                                                    <div class="no-class-cell">&nbsp;</div>
+                                                {% endif %}
+                                            </td>
+                                        {% endfor %}
+                                    {% endif %}
                                 </tr>
-                            {% endif %}
+                            {% endfor %}
                         </tbody>
                     </table>
                 </div>
@@ -311,6 +430,21 @@
                     <div class="mt-4 flex justify-end space-x-2">
                         <button onclick="confirmSubstituteRequest()" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-full">Send Request</button>
                         <button onclick="closeSubstituteModal()" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-full">Close</button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="swapModal" class="modal">
+                <div class="modal-content">
+                    <span class="close-button" onclick="closeSwapModal()">&times;</span>
+                    <h2 class="text-xl font-semibold mb-4">Request a Class Swap</h2>
+                    <input type="hidden" id="swap-original-entry-id">
+                    <p>Select a class to swap with:</p>
+                    <select id="swap-other-class-select" class="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm">
+                        </select>
+                    <div class="mt-4 flex justify-end space-x-2">
+                        <button id="send-swap-request-button" onclick="confirmSwapRequest()" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-full">Send Swap Request</button>
+                        <button onclick="closeSwapModal()" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-full">Close</button>
                     </div>
                 </div>
             </div>
@@ -483,29 +617,78 @@
                 console.error(`Error responding to substitute request ${status}:`, error);
                 showMessageModal('An unexpected error occurred while responding to the request.', false);
             }
+        };
+
+        // NEW: Swap Modal Functions
+        async function openSwapModal(entryId) {
+            currentTimetableEntryId = entryId;
+            document.getElementById('swap-original-entry-id').value = entryId;
+            
+            const swapSelect = document.getElementById('swap-other-class-select');
+            swapSelect.innerHTML = '<option value="">Loading...</option>'; // Show a loading state
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/faculty/get_swap_options/${entryId}`);
+                const options = await response.json();
+                
+                swapSelect.innerHTML = ''; // Clear loading state
+                if (options.length > 0) {
+                    options.forEach(option => {
+                        const optionElement = document.createElement('option');
+                        optionElement.value = option.entry_id;
+                        optionElement.textContent = `${option.subject_name} (${option.section_name}) - ${option.day_of_week} at ${option.start_time}`;
+                        swapSelect.appendChild(optionElement);
+                    });
+                } else {
+                    swapSelect.innerHTML = '<option value="">No eligible classes to swap with.</option>';
+                    document.getElementById('send-swap-request-button').disabled = true;
+                }
+                
+            } catch (error) {
+                console.error('Error fetching swap options:', error);
+                swapSelect.innerHTML = '<option value="">Error loading options.</option>';
+                document.getElementById('send-swap-request-button').disabled = true;
+            }
+
+            document.getElementById('swapModal').style.display = 'flex';
         }
 
-        // Logout functionality
-        document.getElementById('logout-button').addEventListener('click', async () => {
+        function closeSwapModal() {
+            document.getElementById('swapModal').style.display = 'none';
+            document.getElementById('swap-other-class-select').innerHTML = ''; // Clear options
+            document.getElementById('send-swap-request-button').disabled = false;
+        }
+
+        async function confirmSwapRequest() {
+            const originalEntryId = document.getElementById('swap-original-entry-id').value;
+            const swappedEntryId = document.getElementById('swap-other-class-select').value;
+
+            if (!swappedEntryId) {
+                showMessageModal('Please select a class to swap with.', false);
+                return;
+            }
+
             try {
-                const response = await fetch(`${API_BASE_URL}/logout`, {
+                const response = await fetch(`${API_BASE_URL}/api/faculty/current/request_swap`, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        original_entry_id: originalEntryId,
+                        swapped_entry_id: swappedEntryId
+                    })
                 });
                 const data = await response.json();
                 if (response.ok) {
-                    window.location.href = `${API_BASE_URL}${data.redirect_url}`;
+                    showMessageModal(data.message, true);
+                    closeSwapModal();
                 } else {
-                    console.error('Logout failed:', data.error);
-                    showMessageModal('Logout failed. Please try again.', false);
+                    showMessageModal(data.error || 'Failed to send swap request.', false);
                 }
             } catch (error) {
-                console.error('Error during logout:', error);
-                showMessageModal('An unexpected error occurred during logout.', false);
+                console.error('Error sending swap request:', error);
+                showMessageModal('An unexpected error occurred while sending the swap request.', false);
             }
-        });
+        }
 
     </script>
 </body>
